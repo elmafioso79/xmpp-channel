@@ -17,52 +17,52 @@ export const XmppActionSchema = z.object({
  */
 export const XmppAccountSchema = z.object({
   /** Account name (optional display name) */
-  name: z.string().optional(),
+  name: z.string().optional().describe("Display name for this account"),
 
   /** Whether this account is enabled */
-  enabled: z.boolean().optional().default(true),
+  enabled: z.boolean().optional().default(true).describe("Enable or disable this account"),
 
   /** Bot JID (e.g., bot@example.com) */
-  jid: z.string().optional(),
+  jid: z.string().optional().describe("Bot JID (e.g., bot@example.com)"),
 
   /** XMPP account password */
-  password: z.string().optional(),
+  password: z.string().optional().describe("XMPP account password"),
 
   /** XMPP server hostname (defaults to JID domain) */
-  server: z.string().optional(),
+  server: z.string().optional().describe("XMPP server hostname (defaults to JID domain)"),
 
   /** XMPP server port */
-  port: z.number().int().min(1).max(65535).optional().default(5222),
+  port: z.number().int().min(1).max(65535).optional().default(5222).describe("XMPP server port"),
 
   /** XMPP resource identifier */
-  resource: z.string().optional().default("openclaw"),
+  resource: z.string().optional().default("openclaw").describe("XMPP resource identifier"),
 
   /** Direct message policy */
-  dmPolicy: z.enum(["open", "pairing", "allowlist"]).optional().default("open"),
+  dmPolicy: z.enum(["open", "pairing", "allowlist"]).optional().default("open").describe("Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom)"),
 
   /** Group message policy */
-  groupPolicy: z.enum(["open", "allowlist"]).optional().default("open"),
+  groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
 
   /** Allowed sender JIDs */
-  allowFrom: z.array(z.string()).optional(),
+  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs (use * for all)"),
 
   /** MUC rooms to join */
-  mucs: z.array(z.string()).optional(),
+  mucs: z.array(z.string()).optional().describe("MUC rooms to join on startup"),
 
   /** XEP-0363 HTTP File Upload endpoint (deprecated) */
-  fileUploadUrl: z.string().url().optional(),
+  fileUploadUrl: z.string().url().optional().describe("HTTP File Upload URL (deprecated, use fileUploadService)"),
 
   /** XEP-0363 HTTP File Upload service JID (auto-discovered if not set) */
-  fileUploadService: z.string().optional(),
+  fileUploadService: z.string().optional().describe("HTTP File Upload service JID (auto-discovered if not set)"),
 
   /** Action configuration */
-  actions: XmppActionSchema.optional(),
+  actions: XmppActionSchema.optional().describe("Action configuration (reactions, sendMessage)"),
 
   /** Inbound message prefix */
-  messagePrefix: z.string().optional(),
+  messagePrefix: z.string().optional().describe("Prefix added to inbound messages"),
 
   /** Heartbeat visibility */
-  heartbeatVisibility: z.enum(["visible", "hidden"]).optional(),
+  heartbeatVisibility: z.enum(["visible", "hidden"]).optional().describe("Heartbeat visibility in status"),
 });
 
 /**
