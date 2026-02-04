@@ -1,0 +1,34 @@
+# Source files (dist is published)
+src/
+index.ts
+tsconfig.json
+
+# Development
+.github/
+.vscode/
+.idea/
+
+# Tests
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
+vitest.config.ts
+
+# Config files
+.eslintrc*
+.prettierrc*
+.editorconfig
+
+# Documentation (README is included)
+CONTRIBUTING.md
+CHANGELOG.md
+
+# Git
+.git/
+.gitignore
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db

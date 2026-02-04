@@ -1,0 +1,118 @@
+{
+  "id": "xmpp",
+  "name": "XMPP Channel",
+  "description": "XMPP/Jabber channel plugin for Prosody, ejabberd, and other XMPP servers",
+  "version": "0.1.0",
+  "channels": ["xmpp"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "jid": {
+        "type": "string",
+        "description": "Bot JID (e.g., bot@example.com)"
+      },
+      "password": {
+        "type": "string",
+        "description": "XMPP account password"
+      },
+      "server": {
+        "type": "string",
+        "description": "XMPP server hostname (defaults to JID domain)"
+      },
+      "port": {
+        "type": "number",
+        "default": 5222,
+        "description": "XMPP server port"
+      },
+      "resource": {
+        "type": "string",
+        "default": "openclaw",
+        "description": "XMPP resource identifier"
+      },
+      "name": {
+        "type": "string",
+        "description": "Account display name"
+      },
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this account is enabled"
+      },
+      "dmPolicy": {
+        "type": "string",
+        "enum": ["open", "pairing", "allowlist"],
+        "default": "open",
+        "description": "Direct message policy"
+      },
+      "groupPolicy": {
+        "type": "string",
+        "enum": ["open", "allowlist"],
+        "default": "open",
+        "description": "Group message policy"
+      },
+      "allowFrom": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowed sender JIDs (empty = allow all)"
+      },
+      "mucs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "MUC rooms to join (e.g., room@conference.example.com)"
+      },
+      "fileUploadUrl": {
+        "type": "string",
+        "description": "XEP-0363 HTTP File Upload endpoint"
+      },
+      "actions": {
+        "type": "object",
+        "properties": {
+          "reactions": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable XEP-0444 message reactions"
+          },
+          "sendMessage": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable send message action"
+          }
+        },
+        "description": "Action configuration"
+      },
+      "messagePrefix": {
+        "type": "string",
+        "description": "Inbound message prefix"
+      },
+      "heartbeatVisibility": {
+        "type": "string",
+        "enum": ["visible", "hidden"],
+        "description": "Heartbeat message visibility"
+      },
+      "accounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "jid": { "type": "string" },
+            "password": { "type": "string" },
+            "server": { "type": "string" },
+            "port": { "type": "number" },
+            "resource": { "type": "string" },
+            "name": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "dmPolicy": { "type": "string" },
+            "groupPolicy": { "type": "string" },
+            "allowFrom": { "type": "array", "items": { "type": "string" } },
+            "mucs": { "type": "array", "items": { "type": "string" } },
+            "fileUploadUrl": { "type": "string" },
+            "actions": { "type": "object" },
+            "messagePrefix": { "type": "string" },
+            "heartbeatVisibility": { "type": "string" }
+          }
+        },
+        "description": "Multi-account configuration"
+      }
+    }
+  }
+}

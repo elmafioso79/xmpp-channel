@@ -1,0 +1,95 @@
+{
+  "name": "@openclaw/xmpp",
+  "version": "0.1.0",
+  "description": "XMPP channel plugin for OpenClaw (Prosody, ejabberd, and other XMPP servers)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
+    "test": "vitest",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"index.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"index.ts\"",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elmafioso79/xmpp-channel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/elmafioso79/xmpp-channel/issues"
+  },
+  "homepage": "https://github.com/elmafioso79/xmpp-channel#readme",
+  "author": "OpenClaw Contributors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@xmpp/client": "^0.13.1",
+    "@xmpp/debug": "^0.13.1",
+    "mime-types": "^3.0.2",
+    "zod": "^3.22.0",
+    "zod-to-json-schema": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^9.39.2",
+    "prettier": "^3.8.1",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=0.1.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "xmpp",
+      "label": "XMPP",
+      "selectionLabel": "XMPP (Jabber/Prosody/ejabberd)",
+      "docsPath": "/channels/xmpp",
+      "blurb": "Connect to XMPP servers including Prosody and ejabberd.",
+      "aliases": [
+        "jabber",
+        "prosody",
+        "ejabberd"
+      ]
+    }
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "xmpp",
+    "jabber",
+    "prosody",
+    "ejabberd",
+    "channel",
+    "chat",
+    "messaging",
+    "im"
+  ]
+}
