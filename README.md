@@ -16,19 +16,23 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 
 ## Installation
 
+### From GitHub
 ```bash
-npm install @openclaw/xmpp
+openclaw plugins install github:elmafioso79/xmpp-channel
 ```
 
-Or add to your OpenClaw plugins:
-
-```bash
-openclaw plugins add xmpp
-```
-
-## Configuration
-
-Add to `~/.openclaw/openclaw.json`:
+### Manual Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/elmafioso79/xmpp-channel.git ~/.openclaw/extensions/xmpp
+   ```
+2. Install dependencies and build:
+   ```bash
+   cd ~/.openclaw/extensions/xmpp
+   npm install
+   npm run build
+   ```
+3. Add to your `openclaw.json`:
 
 ```json
 {

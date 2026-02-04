@@ -6,6 +6,8 @@ import { getXmppRuntime } from "./runtime.js";
 import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
 import { parsePepEvent, type PepItem } from "./pep.js";
 import { sendXmppMedia } from "./outbound.js";
+import * as fs from "fs";
+import * as path from "path";
 
 // PEP event handlers registry
 type PepEventHandler = (event: {
@@ -21,6 +23,81 @@ const pepEventHandlers: PepEventHandler[] = [];
 
 // Active XMPP clients by accountId
 const activeClients = new Map<string, ReturnType<typeof client>>();
+
+// Track rooms that returned "gone" error to avoid retry loops
+const goneRooms = new Set<string>();
+
+// Track successfully joined rooms per account (in-memory cache)
+const joinedRooms = new Map<string, Set<string>>();
+
+// Persistent storage for dynamically joined rooms
+const ROOMS_STORE_FILENAME = "xmpp-rooms.json";
+
+interface RoomsStore {
+  rooms: Record<string, string[]>; // accountId -> room JIDs
+}
+
+function getRoomsStorePath(): string {
+  // Store in OpenClaw extensions folder
+  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
+  return path.join(homeDir, ".openclaw", "extensions", "xmpp", ROOMS_STORE_FILENAME);
+}
+
+function loadPersistedRooms(log?: Logger): RoomsStore {
+  try {
+    const storePath = getRoomsStorePath();
+    if (fs.existsSync(storePath)) {
+      const data = fs.readFileSync(storePath, "utf-8");
+      return JSON.parse(data) as RoomsStore;
+    }
+  } catch (err) {
+    log?.warn?.(`[XMPP] Failed to load persisted rooms: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return { rooms: {} };
+}
+
+function savePersistedRooms(store: RoomsStore, log?: Logger): void {
+  try {
+    const storePath = getRoomsStorePath();
+    const dir = path.dirname(storePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
+    log?.debug?.(`[XMPP] Saved persisted rooms`);
+  } catch (err) {
+    log?.error?.(`[XMPP] Failed to save persisted rooms: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function addPersistedRoom(accountId: string, roomJid: string, log?: Logger): void {
+  const store = loadPersistedRooms(log);
+  if (!store.rooms[accountId]) {
+    store.rooms[accountId] = [];
+  }
+  if (!store.rooms[accountId].includes(roomJid)) {
+    store.rooms[accountId].push(roomJid);
+    savePersistedRooms(store, log);
+    log?.info?.(`[XMPP] Persisted room ${roomJid} for account ${accountId}`);
+  }
+}
+
+function removePersistedRoom(accountId: string, roomJid: string, log?: Logger): void {
+  const store = loadPersistedRooms(log);
+  if (store.rooms[accountId]) {
+    const idx = store.rooms[accountId].indexOf(roomJid);
+    if (idx !== -1) {
+      store.rooms[accountId].splice(idx, 1);
+      savePersistedRooms(store, log);
+      log?.info?.(`[XMPP] Removed persisted room ${roomJid} for account ${accountId}`);
+    }
+  }
+}
+
+function getPersistedRooms(accountId: string, log?: Logger): string[] {
+  const store = loadPersistedRooms(log);
+  return store.rooms[accountId] || [];
+}
 
 /**
  * Start XMPP connection for an account
@@ -189,6 +266,27 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       const unsubscribed = xml("presence", { to: fromBare, type: "unsubscribed" });
       await xmpp.send(unsubscribed);
     }
+    
+    // Handle presence errors (e.g., MUC join failures)
+    if (type === "error") {
+      const errorEl = stanza.getChild("error");
+      const errorType = errorEl?.attrs?.type || "unknown";
+      // Get the first child element that isn't "text" as the error condition
+      const errorCondition = errorEl?.children
+        ?.filter((c): c is Element => typeof c !== "string" && c.name !== "text")
+        ?.[0]?.name || "unknown";
+      const errorText = errorEl?.getChildText("text") || "";
+      log?.error?.(`[${accountId}] XMPP presence error from ${from}: type=${errorType} condition=${errorCondition} text="${errorText}"`);
+      
+      // Track "gone" rooms so we don't keep trying to rejoin
+      if (errorCondition === "gone") {
+        const roomJid = bareJid(from);
+        goneRooms.add(roomJid);
+        // Remove from persistence so we don't try to rejoin after restart
+        removePersistedRoom(accountId, roomJid, log);
+        log?.warn?.(`[${accountId}] Room ${roomJid} no longer exists, removed from persisted rooms`);
+      }
+    }
   });
 
   // Handle MUC invites (mediated invites from room)
@@ -209,6 +307,12 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     const inviterJid = bareJid(invite.attrs.from || "");
     const reason = invite.getChildText("reason") || "No reason provided";
     
+    // If we receive an invite, the room exists - clear any "gone" status
+    if (goneRooms.has(roomJid)) {
+      log?.info?.(`[${accountId}] Room ${roomJid} was recreated, clearing gone status`);
+      goneRooms.delete(roomJid);
+    }
+    
     log?.info?.(`[${accountId}] MUC invite: room=${roomJid} from=${inviterJid} reason="${reason}"`);
     
     // Auto-accept the invite by joining the room
@@ -225,12 +329,21 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       await xmpp.send(joinPresence);
       log?.debug?.(`[${accountId}] Sent join presence to ${roomJid}`);
       
+      // Track as joined (in-memory)
+      if (!joinedRooms.has(accountId)) {
+        joinedRooms.set(accountId, new Set());
+      }
+      joinedRooms.get(accountId)!.add(roomJid);
+      
+      // Persist the room so we rejoin after restart
+      addPersistedRoom(accountId, roomJid, log);
+      
       // Send acknowledgment message to inviter via DM
       if (inviterJid) {
         const ackMsg = xml(
           "message",
           { to: inviterJid, type: "chat" },
-          xml("body", {}, `Joined ${roomJid} — thanks for the invite! 👻`)
+          xml("body", {}, `Joined ${roomJid} — thanks for the invite!`)
         );
         await xmpp.send(ackMsg);
         log?.debug?.(`[${accountId}] Sent ack to ${inviterJid}`);
@@ -242,7 +355,7 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
           const greeting = xml(
             "message",
             { to: roomJid, type: "groupchat" },
-            xml("body", {}, `👻 Aurora has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
+            xml("body", {}, `[${accountId}] has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
           );
           await xmpp.send(greeting);
           log?.debug?.(`[${accountId}] Sent greeting to room ${roomJid}`);
@@ -289,11 +402,20 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       lastError: null,
     });
 
-    // Join MUC rooms if configured
+    // Join MUC rooms from config
     if (config.mucs && config.mucs.length > 0) {
       for (const muc of config.mucs) {
-        joinMuc(xmpp, muc, resource, log);
+        joinMuc(xmpp, muc, resource, log, accountId);
       }
+    }
+    
+    // Join persisted rooms (from previous invites)
+    const persistedRooms = getPersistedRooms(accountId, log);
+    for (const roomJid of persistedRooms) {
+      // Skip if already in config (avoid duplicate joins)
+      if (config.mucs?.includes(roomJid)) continue;
+      log?.info?.(`[${accountId}] Rejoining persisted room: ${roomJid}`);
+      joinMuc(xmpp, roomJid, resource, log, accountId);
     }
   });
 
@@ -365,8 +487,15 @@ function joinMuc(
   xmpp: ReturnType<typeof client>,
   roomJid: string,
   nick: string,
-  log?: Logger
+  log?: Logger,
+  accountId?: string
 ): void {
+  // Skip rooms that have returned "gone" error
+  if (goneRooms.has(roomJid)) {
+    log?.debug?.(`[XMPP] Skipping gone room: ${roomJid}`);
+    return;
+  }
+
   log?.debug?.(`[XMPP] Joining MUC: ${roomJid}`);
 
   const presence = xml(
@@ -375,7 +504,15 @@ function joinMuc(
     xml("x", { xmlns: "http://jabber.org/protocol/muc" })
   );
 
-  xmpp.send(presence).catch((err) => {
+  xmpp.send(presence).then(() => {
+    // Track as joined (will be confirmed by presence from room)
+    if (accountId) {
+      if (!joinedRooms.has(accountId)) {
+        joinedRooms.set(accountId, new Set());
+      }
+      joinedRooms.get(accountId)!.add(roomJid);
+    }
+  }).catch((err) => {
     log?.error?.(`[XMPP] Failed to join MUC ${roomJid}: ${err.message}`);
   });
 }
