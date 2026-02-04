@@ -191,6 +191,80 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     }
   });
 
+  // Handle MUC invites (mediated invites from room)
+  xmpp.on("stanza", async (stanza) => {
+    if (!stanza.is("message")) return;
+    
+    const from = stanza.attrs.from;
+    if (!from) return;
+    
+    // Check for MUC mediated invite: <x xmlns="http://jabber.org/protocol/muc#user"><invite from="...">...
+    const mucUserX = stanza.getChild("x", "http://jabber.org/protocol/muc#user");
+    if (!mucUserX) return;
+    
+    const invite = mucUserX.getChild("invite");
+    if (!invite) return;
+    
+    const roomJid = bareJid(from);
+    const inviterJid = bareJid(invite.attrs.from || "");
+    const reason = invite.getChildText("reason") || "No reason provided";
+    
+    log?.info?.(`[${accountId}] MUC invite: room=${roomJid} from=${inviterJid} reason="${reason}"`);
+    
+    // Auto-accept the invite by joining the room
+    const nick = resource;
+    log?.debug?.(`[${accountId}] Auto-joining ${roomJid} as ${nick}`);
+    
+    try {
+      // Send presence to join the room
+      const joinPresence = xml(
+        "presence",
+        { to: `${roomJid}/${nick}` },
+        xml("x", { xmlns: "http://jabber.org/protocol/muc" })
+      );
+      await xmpp.send(joinPresence);
+      log?.debug?.(`[${accountId}] Sent join presence to ${roomJid}`);
+      
+      // Send acknowledgment message to inviter via DM
+      if (inviterJid) {
+        const ackMsg = xml(
+          "message",
+          { to: inviterJid, type: "chat" },
+          xml("body", {}, `Joined ${roomJid} — thanks for the invite! 👻`)
+        );
+        await xmpp.send(ackMsg);
+        log?.debug?.(`[${accountId}] Sent ack to ${inviterJid}`);
+      }
+      
+      // Also send a greeting to the room (wait for join to complete)
+      setTimeout(async () => {
+        try {
+          const greeting = xml(
+            "message",
+            { to: roomJid, type: "groupchat" },
+            xml("body", {}, `👻 Aurora has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
+          );
+          await xmpp.send(greeting);
+          log?.debug?.(`[${accountId}] Sent greeting to room ${roomJid}`);
+        } catch (err) {
+          log?.error?.(`[${accountId}] Failed to send room greeting: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }, 1000);
+    } catch (err) {
+      log?.error?.(`[${accountId}] Failed to join room ${roomJid}: ${err instanceof Error ? err.message : String(err)}`);
+      
+      // Notify inviter of failure
+      if (inviterJid) {
+        const failMsg = xml(
+          "message",
+          { to: inviterJid, type: "chat" },
+          xml("body", {}, `Sorry, I couldn't join ${roomJid}: ${err instanceof Error ? err.message : "unknown error"}`)
+        );
+        await xmpp.send(failMsg).catch(() => {}); // Ignore errors here
+      }
+    }
+  });
+
   // Connection events
   xmpp.on("online", (address) => {
     log?.info?.(`[${accountId}] XMPP online as ${address.toString()}`);
