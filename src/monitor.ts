@@ -144,10 +144,10 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
 
   // XEP-0198 Stream Management event handlers
   const streamManagement = (xmpp as unknown as { streamManagement?: {
-    on: (event: string, handler: (stanza?: Element) => void) => void;
+    on?: (event: string, handler: (stanza?: Element) => void) => void;
   } }).streamManagement;
   
-  if (streamManagement) {
+  if (streamManagement && typeof streamManagement.on === "function") {
     streamManagement.on("resumed", () => {
       log?.info?.(`[${accountId}] XEP-0198 Stream Management: session resumed`);
       setStatus?.({ accountId, connected: true, lastConnectedAt: Date.now() });

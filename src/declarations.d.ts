@@ -15,6 +15,21 @@ declare module "openclaw/plugin-sdk" {
   /** Per-sender tool policy configuration */
   export type GroupToolPolicyBySenderConfig = Record<string, GroupToolPolicyConfig | undefined>;
 
+  /** Command authorizer for resolveControlCommandGate */
+  export interface CommandAuthorizer {
+    configured: boolean;
+    allowed: boolean;
+  }
+
+  /** Resolve control command authorization */
+  export function resolveControlCommandGate(params: {
+    useAccessGroups: boolean;
+    authorizers: CommandAuthorizer[];
+    allowTextCommands: boolean;
+    hasControlCommand: boolean;
+    modeWhenAccessGroupsOff?: "allow" | "deny" | "configured";
+  }): { commandAuthorized: boolean; shouldBlock: boolean };
+
   export interface OpenClawPluginApi {
     runtime: PluginRuntime;
     registerChannel: (registration: { plugin: unknown; dock?: unknown }) => void;
@@ -75,6 +90,11 @@ declare module "openclaw/plugin-sdk" {
       session: {
         resolveStorePath: (store: unknown, params: { agentId: string }) => string;
         recordInboundSession: (params: unknown) => Promise<void>;
+      };
+      text: {
+        hasControlCommand: (text: string, cfg: OpenClawConfig) => boolean;
+        chunkMarkdownText: (text: string, limit: number) => string[];
+        resolveTextChunkLimit: (cfg: OpenClawConfig, channel: string, accountId?: string) => number;
       };
       reply: {
         buildReplyContext: (params: unknown) => Record<string, unknown>;

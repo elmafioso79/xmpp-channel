@@ -67,6 +67,15 @@ export async function handleInboundMessage(
 
   log?.info?.(`[XMPP] Inbound: from=${senderBare} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);
 
+  // Simple command authorization - if sender is allowed, they can use commands
+  // Commands are handled by OpenClaw core when CommandAuthorized is true
+  const dmPolicy = config.dmPolicy ?? "open";
+  const allowFromList = normalizeAllowFrom(config.allowFrom);
+  const senderAllowedForDm = dmPolicy === "open" || isSenderAllowed(allowFromList, senderBare);
+  
+  // Authorize commands for any allowed sender
+  const commandAuthorized = senderAllowedForDm;
+  
   // Route to OpenClaw
   const route = rt.channel.routing.resolveAgentRoute({
     cfg,
@@ -77,8 +86,6 @@ export async function handleInboundMessage(
       id: message.isGroup ? message.roomJid! : senderBare,
     },
   });
-
-  log?.debug?.(`[XMPP] Route: ${route.sessionKey} agent=${route.agentId}`);
 
   const storePath = rt.channel.session.resolveStorePath((cfg as { session?: { store?: string } }).session?.store, {
     agentId: route.agentId,
@@ -102,6 +109,7 @@ export async function handleInboundMessage(
     MessageSid: message.id || `xmpp-${Date.now()}`,
     OriginatingChannel: "xmpp" as const,
     OriginatingTo: `xmpp:${message.isGroup ? message.roomJid : senderBare}`,
+    CommandAuthorized: commandAuthorized,
   });
 
   await rt.channel.session.recordInboundSession({

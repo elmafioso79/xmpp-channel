@@ -6,7 +6,163 @@
   "channels": ["xmpp"],
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
-    "properties": {}
+    "additionalProperties": true,
+    "properties": {
+      "jid": {
+        "type": "string",
+        "description": "Bot JID (e.g., bot@example.com)"
+      },
+      "password": {
+        "type": "string",
+        "description": "XMPP account password",
+        "sensitive": true
+      },
+      "server": {
+        "type": "string",
+        "description": "XMPP server hostname (defaults to JID domain)"
+      },
+      "port": {
+        "type": "number",
+        "default": 5222,
+        "description": "XMPP server port"
+      },
+      "resource": {
+        "type": "string",
+        "description": "XMPP resource identifier"
+      },
+      "mucNick": {
+        "type": "string",
+        "description": "Nickname in MUC rooms (defaults to JID local part)"
+      },
+      "name": {
+        "type": "string",
+        "description": "Account display name"
+      },
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this account is enabled"
+      },
+      "configWrites": {
+        "type": "boolean",
+        "default": true,
+        "description": "Allow agent to modify config (add users to allowlist, etc.)"
+      },
+      "dmPolicy": {
+        "type": "string",
+        "enum": ["open", "pairing", "allowlist"],
+        "default": "open",
+        "description": "Direct message policy"
+      },
+      "groupPolicy": {
+        "type": "string",
+        "enum": ["open", "allowlist"],
+        "default": "open",
+        "description": "Group message policy"
+      },
+      "allowFrom": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowed sender JIDs for DMs (use * for all)"
+      },
+      "groupAllowFrom": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowed sender JIDs in groups (falls back to allowFrom)"
+      },
+      "mucs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "MUC rooms to auto-join"
+      },
+      "fileUploadService": {
+        "type": "string",
+        "description": "XEP-0363 HTTP File Upload service JID (auto-discovered)"
+      },
+      "actions": {
+        "type": "object",
+        "properties": {
+          "reactions": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable XEP-0444 message reactions"
+          },
+          "sendMessage": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable send message action"
+          }
+        },
+        "description": "Action configuration"
+      },
+      "messagePrefix": {
+        "type": "string",
+        "description": "Inbound message prefix"
+      },
+      "heartbeatVisibility": {
+        "type": "string",
+        "enum": ["visible", "hidden"],
+        "description": "Heartbeat message visibility"
+      },
+      "accounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "jid": { "type": "string", "description": "Bot JID" },
+            "password": { "type": "string", "sensitive": true, "description": "XMPP password" },
+            "server": { "type": "string", "description": "XMPP server hostname" },
+            "port": { "type": "number", "default": 5222, "description": "XMPP server port" },
+            "resource": { "type": "string", "description": "XMPP resource identifier" },
+            "mucNick": { "type": "string", "description": "Nickname in MUC rooms" },
+            "name": { "type": "string", "description": "Account display name" },
+            "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
+            "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
+            "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist"], "description": "DM policy" },
+            "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
+            "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed DM senders" },
+            "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
+            "mucs": { "type": "array", "items": { "type": "string" }, "description": "MUC rooms to join" },
+            "fileUploadService": { "type": "string", "description": "XEP-0363 upload service JID" },
+            "actions": { "type": "object", "description": "Action configuration" },
+            "messagePrefix": { "type": "string", "description": "Inbound message prefix" },
+            "heartbeatVisibility": { "type": "string", "enum": ["visible", "hidden"], "description": "Heartbeat visibility" },
+            "groups": { "type": "object", "description": "Per-group configuration" }
+          }
+        },
+        "description": "Multi-account configuration"
+      },
+      "groups": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "requireMention": { "type": "boolean", "description": "Require @mention in this group" },
+            "tools": {
+              "type": "object",
+              "properties": {
+                "allow": { "type": "array", "items": { "type": "string" }, "description": "Allowed tools" },
+                "alsoAllow": { "type": "array", "items": { "type": "string" }, "description": "Additional allowed tools" },
+                "deny": { "type": "array", "items": { "type": "string" }, "description": "Denied tools" }
+              },
+              "description": "Tool access policy"
+            },
+            "toolsBySender": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "allow": { "type": "array", "items": { "type": "string" } },
+                  "alsoAllow": { "type": "array", "items": { "type": "string" } },
+                  "deny": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "description": "Per-sender tool access overrides"
+            }
+          }
+        },
+        "description": "Per-group configuration (keyed by room JID)"
+      }
+    }
   }
 }

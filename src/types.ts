@@ -64,6 +64,8 @@ export interface XmppConfig {
   name?: string;
   /** Whether this account is enabled */
   enabled?: boolean;
+  /** Allow agent to modify config (default: true) */
+  configWrites?: boolean;
   /** Direct message policy */
   dmPolicy?: DmPolicy;
   /** Group message policy */

@@ -45,8 +45,7 @@
   "dependencies": {
     "@xmpp/client": "^0.13.1",
     "@xmpp/debug": "^0.13.1",
-    "mime-types": "^3.0.2",
-    "zod": "^3.22.0"
+    "mime-types": "^3.0.2"
   },
   "devDependencies": {
     "@types/mime-types": "^3.0.1",
@@ -60,7 +59,10 @@
     "vitest": "^1.0.0"
   },
   "peerDependencies": {
-    "openclaw": ">=0.1.0"
+    "openclaw": "^2026.2.2-3"
+  },
+  "overrides": {
+    "zod": "4.3.6"
   },
   "openclaw": {
     "extensions": [

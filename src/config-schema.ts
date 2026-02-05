@@ -45,6 +45,9 @@ export const XmppAccountSchema = z.object({
   /** Whether this account is enabled */
   enabled: z.boolean().optional().default(true).describe("Enable or disable this account"),
 
+  /** Allow the agent to write to config (e.g., add users to allowlist) */
+  configWrites: z.boolean().optional().describe("Allow agent to modify config (default: true)"),
+
   /** Bot JID (e.g., bot@example.com) */
   jid: z.string().optional().describe("Bot JID (e.g., bot@example.com)"),
 

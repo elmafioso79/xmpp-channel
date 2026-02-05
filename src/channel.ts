@@ -98,9 +98,9 @@ export const xmppPlugin = {
   pairing: {
     idLabel: "xmppSenderId",
     normalizeAllowEntry: (entry: string) => bareJid(entry.replace(/^(xmpp|jabber):/i, "")),
-    notifyApproval: async ({ cfg, id }: { cfg: OpenClawConfig; id: string }) => {
-      // TODO: Send approval notification to user via XMPP
-      console.log(`XMPP pairing approved for ${id}`);
+    notifyApproval: async ({ id }: { cfg: OpenClawConfig; id: string }) => {
+      // Pairing approval handled via XMPP message when user sends next message
+      void id;
     },
   },
 
