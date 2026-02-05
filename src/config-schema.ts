@@ -67,10 +67,10 @@ export const XmppAccountSchema = z.object({
   mucNick: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
 
   /** Direct message policy */
-  dmPolicy: z.enum(["open", "pairing", "allowlist"]).optional().default("open").describe("Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom)"),
+  dmPolicy: z.enum(["open", "pairing", "allowlist", "disabled"]).optional().default("open").describe("Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom), disabled (block all DMs)"),
 
   /** Group message policy */
-  groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
+  groupPolicy: z.enum(["open", "allowlist", "disabled"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist), disabled (block all groups)"),
 
   /** Allowed sender JIDs (for DMs) */
   allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for DMs (use * for all)"),

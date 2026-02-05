@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/xmpp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "XMPP channel plugin for OpenClaw (Prosody, ejabberd, and other XMPP servers)",
   "type": "module",
   "main": "dist/index.js",

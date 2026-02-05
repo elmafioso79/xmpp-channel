@@ -185,14 +185,21 @@ export const xmppPlugin = {
 
   // Security adapter
   security: {
-    resolveDmPolicy: ({ account }: { account: ResolvedXmppAccount }) => ({
-      policy: account.config?.dmPolicy || "open",
-      allowFrom: account.config?.allowFrom || [],
-      policyPath: "channels.xmpp.dmPolicy",
-      allowFromPath: "channels.xmpp.allowFrom",
-      approveHint: formatPairingApproveHint("xmpp"),
-      normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
-    }),
+    resolveDmPolicy: ({ cfg, accountId, account }: { cfg: OpenClawConfig; accountId?: string | null; account: ResolvedXmppAccount }) => {
+      const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
+      const useAccountPath = Boolean((cfg as { channels?: { xmpp?: { accounts?: Record<string, unknown> } } }).channels?.xmpp?.accounts?.[resolvedAccountId]);
+      const basePath = useAccountPath
+        ? `channels.xmpp.accounts.${resolvedAccountId}.`
+        : "channels.xmpp.";
+      return {
+        policy: account.config?.dmPolicy || "open",
+        allowFrom: account.config?.allowFrom || [],
+        policyPath: `${basePath}dmPolicy`,
+        allowFromPath: basePath,
+        approveHint: formatPairingApproveHint("xmpp"),
+        normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
+      };
+    },
   },
 
   // Groups adapter

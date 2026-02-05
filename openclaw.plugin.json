@@ -50,15 +50,15 @@
       },
       "dmPolicy": {
         "type": "string",
-        "enum": ["open", "pairing", "allowlist"],
+        "enum": ["open", "pairing", "allowlist", "disabled"],
         "default": "open",
-        "description": "Direct message policy"
+        "description": "Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom), disabled (block all DMs)"
       },
       "groupPolicy": {
         "type": "string",
-        "enum": ["open", "allowlist"],
+        "enum": ["open", "allowlist", "disabled"],
         "default": "open",
-        "description": "Group message policy"
+        "description": "Group message policy: open (respond to all), allowlist (require mention or allowlist), disabled (block all groups)"
       },
       "allowFrom": {
         "type": "array",
@@ -118,8 +118,8 @@
             "name": { "type": "string", "description": "Account display name" },
             "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
             "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
-            "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist"], "description": "DM policy" },
-            "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
+            "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist", "disabled"], "description": "DM policy" },
+            "groupPolicy": { "type": "string", "enum": ["open", "allowlist", "disabled"], "description": "Group policy" },
             "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed DM senders" },
             "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
             "mucs": { "type": "array", "items": { "type": "string" }, "description": "MUC rooms to join" },

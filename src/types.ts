@@ -3,12 +3,12 @@ import type { OpenClawConfig, RuntimeEnv, WizardPrompter } from "openclaw/plugin
 /**
  * DM Policy type
  */
-export type DmPolicy = "open" | "pairing" | "allowlist";
+export type DmPolicy = "open" | "pairing" | "allowlist" | "disabled";
 
 /**
  * Group Policy type
  */
-export type GroupPolicy = "open" | "allowlist";
+export type GroupPolicy = "open" | "allowlist" | "disabled";
 
 /**
  * XMPP actions configuration

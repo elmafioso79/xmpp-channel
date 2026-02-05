@@ -39,7 +39,11 @@ export async function handleInboundMessage(
     // For groups: check groupPolicy first
     const groupPolicy = config.groupPolicy ?? "open";
     
-    if (groupPolicy === "open") {
+    if (groupPolicy === "disabled") {
+      // Disabled policy - block all group messages
+      log?.debug?.(`[XMPP] Group message blocked (groupPolicy: disabled)`);
+      return;
+    } else if (groupPolicy === "open") {
       // Open policy - allow all group messages
       log?.debug?.(`[XMPP] Group message allowed (groupPolicy: open)`);
     } else {
@@ -54,12 +58,17 @@ export async function handleInboundMessage(
     // For DMs: check dmPolicy and allowFrom
     const dmPolicy = config.dmPolicy ?? "open";
     
-    if (dmPolicy === "open") {
+    if (dmPolicy === "disabled") {
+      // Disabled policy - block all DMs
+      log?.debug?.(`[XMPP] DM blocked (dmPolicy: disabled)`);
+      return;
+    } else if (dmPolicy === "open") {
       log?.debug?.(`[XMPP] DM allowed (dmPolicy: open)`);
     } else {
+      // pairing or allowlist - check allowFrom
       const allowFrom = normalizeAllowFrom(config.allowFrom);
       if (!isSenderAllowed(allowFrom, senderBare)) {
-        log?.debug?.(`[XMPP] DM blocked: ${senderBare} not in allowFrom`);
+        log?.debug?.(`[XMPP] DM blocked: ${senderBare} not in allowFrom (dmPolicy: ${dmPolicy})`);
         return;
       }
     }
