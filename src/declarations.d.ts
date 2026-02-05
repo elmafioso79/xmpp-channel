@@ -4,6 +4,17 @@ declare module "openclaw/plugin-sdk" {
     uiHints?: Record<string, unknown>;
   }
 
+  /** Tool policy for group tool access control */
+  export interface GroupToolPolicyConfig {
+    /** Tools to explicitly allow */
+    allow?: string[];
+    /** Tools to explicitly deny */
+    deny?: string[];
+  }
+  
+  /** Per-sender tool policy configuration */
+  export type GroupToolPolicyBySenderConfig = Record<string, GroupToolPolicyConfig | undefined>;
+
   export interface OpenClawPluginApi {
     runtime: PluginRuntime;
     registerChannel: (registration: { plugin: unknown; dock?: unknown }) => void;
@@ -90,6 +101,15 @@ declare module "openclaw/plugin-sdk" {
   export const DEFAULT_ACCOUNT_ID: string;
   export function normalizeAccountId(id: string | null | undefined): string;
   export const PAIRING_APPROVED_MESSAGE: string;
+  
+  /** Resolve tool policy for a sender from toolsBySender config */
+  export function resolveToolsBySender(params: {
+    toolsBySender?: GroupToolPolicyBySenderConfig;
+    senderId?: string;
+    senderName?: string;
+    senderUsername?: string;
+    senderE164?: string;
+  }): GroupToolPolicyConfig | undefined;
 }
 
 declare module "@xmpp/client" {

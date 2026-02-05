@@ -5,11 +5,18 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 ## Features
 
 - **Direct Messages** — One-on-one chat via XMPP
-- **Group Chat** — Multi-User Chat (MUC) support
+- **Group Chat** — Multi-User Chat (MUC) with auto-join and invite handling
 - **Multi-Account** — Configure multiple XMPP accounts
-- **Allowlist** — Control who can interact with the bot
+- **Allowlist** — Control who can interact with the bot (DM and group policies)
 - **Pairing** — Approve unknown senders with pairing codes
 - **Reactions** — XEP-0444 message reactions support
+- **Typing Indicators** — XEP-0085 chat state notifications
+- **Read Receipts** — XEP-0333 chat markers
+- **Reply Context** — XEP-0461 message replies with fallback
+- **Media Upload** — XEP-0363 HTTP file upload with auto-discovery
+- **Stream Management** — XEP-0198 for reliable message delivery
+- **Keepalive** — XEP-0199 ping for connection stability
+- **Auto-Reconnect** — Exponential backoff reconnection
 - **Heartbeat** — Periodic status checks and notifications
 - **Onboarding** — CLI setup wizard integration
 - **Directory** — Contact and room listings
@@ -70,9 +77,13 @@ openclaw plugins install github:elmafioso79/xmpp-channel
 | `allowFrom` | string[] | `[]` | Allowed sender JIDs |
 | `mucs` | string[] | `[]` | MUC rooms to auto-join |
 | `fileUploadService` | string | auto | XEP-0363 HTTP File Upload service JID (auto-discovered) |
+| `mucNick` | string | JID local | Nickname to use in MUC rooms |
+| `groupAllowFrom` | string[] | `allowFrom` | Allowed senders in groups (falls back to `allowFrom`) |
 | `actions.reactions` | boolean | `false` | Enable XEP-0444 reactions |
 | `messagePrefix` | string | - | Inbound message prefix |
 | `heartbeatVisibility` | string | - | Heartbeat visibility: `visible`, `hidden` |
+| `groups.<roomJid>.requireMention` | boolean | `false` | Only respond when mentioned in this room |
+| `groups.<roomJid>.tools` | object | - | Tool policy for this room (allow/deny lists) |
 
 ### Multi-Account Configuration
 
@@ -152,20 +163,31 @@ npm test             # Run tests
 src/
 ├── index.ts           # Plugin entry point
 ├── channel.ts         # Main channel plugin definition
-├── accounts.ts        # Account resolution utilities
+├── types.ts           # TypeScript interfaces
 ├── config-schema.ts   # Zod schema for config validation
-├── monitor.ts         # XMPP connection lifecycle
+├── runtime.ts         # Runtime getter/setter
+│
+├── monitor.ts         # Main XMPP connection entry point
+├── state.ts           # Global state maps and constants
+├── stanza-handlers.ts # Presence and invite handlers
+├── inbound.ts         # Inbound message routing to OpenClaw
 ├── outbound.ts        # Send messages to XMPP
+│
+├── rooms.ts           # MUC room management and persistence
+├── keepalive.ts       # XEP-0199 ping keepalive
+├── reconnect.ts       # Exponential backoff reconnection
+├── chat-state.ts      # XEP-0085 typing, XEP-0333 receipts
+│
 ├── pep.ts             # XEP-0163 Personal Eventing Protocol
 ├── http-upload.ts     # XEP-0363 HTTP File Upload
-├── onboarding.ts      # CLI setup wizard
-├── actions.ts         # Message actions (reactions)
+├── actions.ts         # XEP-0444 message reactions
+│
+├── accounts.ts        # Account resolution utilities
+├── normalize.ts       # JID normalization utilities
 ├── directory.ts       # Contact/room directory
 ├── heartbeat.ts       # Heartbeat adapter
-├── normalize.ts       # JID normalization utilities
-├── status-issues.ts   # Status issue detection
-├── types.ts           # TypeScript interfaces
-└── runtime.ts         # Runtime getter/setter
+├── onboarding.ts      # CLI setup wizard
+└── status-issues.ts   # Status issue detection
 ```
 
 ## Roadmap
@@ -174,17 +196,24 @@ src/
 - [x] Phase 2: MUC support, group message handling, onboarding
 - [x] Adapters: config, security, groups, mentions, threading, directory, actions, heartbeat, status
 - [x] Phase 3: XEP-0163 PEP, XEP-0363 HTTP file upload
-- [ ] Phase 4: OMEMO encryption (XEP-0384)
+- [x] Phase 4: XEP-0085 typing, XEP-0333 receipts, XEP-0198 stream management, XEP-0199 keepalive, XEP-0461 replies
+- [x] Code Quality: Modular architecture, split monitor.ts into focused modules
+- [ ] Phase 5: OMEMO encryption (XEP-0384)
 
 ## XEP Support
 
 | XEP | Name | Status |
 |-----|------|--------|
-| XEP-0045 | Multi-User Chat | ✅ Implemented |
+| XEP-0045 | Multi-User Chat | ✅ Implemented (join, invite, self-presence) |
+| XEP-0085 | Chat State Notifications | ✅ Implemented (typing indicators) |
 | XEP-0163 | Personal Eventing Protocol (PEP) | ✅ Implemented |
-| XEP-0363 | HTTP File Upload | ✅ Implemented |
+| XEP-0198 | Stream Management | ✅ Implemented (ack, resume) |
+| XEP-0199 | XMPP Ping | ✅ Implemented (30s keepalive) |
+| XEP-0333 | Chat Markers | ✅ Implemented (read receipts) |
+| XEP-0363 | HTTP File Upload | ✅ Implemented (auto-discovery) |
 | XEP-0384 | OMEMO Encryption | 🔜 Planned |
 | XEP-0444 | Message Reactions | ✅ Implemented |
+| XEP-0461 | Message Replies | ✅ Implemented (with fallback) |
 
 ## License
 

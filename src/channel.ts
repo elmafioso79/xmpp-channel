@@ -1,7 +1,8 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "openclaw/plugin-sdk";
+import type { OpenClawConfig, GroupToolPolicyConfig } from "openclaw/plugin-sdk";
+import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint, resolveToolsBySender } from "openclaw/plugin-sdk";
 import type {
   XmppConfig,
+  XmppGroupConfig,
   ResolvedXmppAccount,
   XmppAccountDescriptor,
   GatewayStartContext,
@@ -23,7 +24,7 @@ import { collectXmppStatusIssues } from "./status-issues.js";
 import { xmppDirectoryAdapter, xmppResolverAdapter } from "./directory.js";
 import { xmppMessageActions } from "./actions.js";
 import { xmppHeartbeatAdapter } from "./heartbeat.js";
-import { normalizeXmppTarget, looksLikeXmppJid, normalizeXmppMessagingTarget } from "./normalize.js";
+import { normalizeXmppTarget, looksLikeXmppJid, normalizeXmppMessagingTarget, normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
 
 /**
  * Get XMPP config from OpenClaw config
@@ -45,30 +46,6 @@ function getConfig(cfg: OpenClawConfig, accountId?: string): XmppConfig {
 function isConfigured(cfg: OpenClawConfig, accountId?: string): boolean {
   const config = getConfig(cfg, accountId);
   return Boolean(config.jid && config.password);
-}
-
-/**
- * Normalize allowFrom list for matching
- */
-function normalizeAllowFrom(list?: string[]): {
-  entries: string[];
-  hasWildcard: boolean;
-} {
-  if (!list || list.length === 0) {
-    return { entries: [], hasWildcard: true }; // Empty = allow all
-  }
-  const entries = list.map((jid) => bareJid(jid).toLowerCase());
-  const hasWildcard = entries.includes("*");
-  return { entries, hasWildcard };
-}
-
-/**
- * Check if sender is allowed
- */
-function isSenderAllowed(allowFrom: ReturnType<typeof normalizeAllowFrom>, senderJid: string): boolean {
-  if (allowFrom.hasWildcard || allowFrom.entries.length === 0) return true;
-  const normalized = bareJid(senderJid).toLowerCase();
-  return allowFrom.entries.includes(normalized);
 }
 
 /**
@@ -224,6 +201,63 @@ export const xmppPlugin = {
       getConfig(cfg).groupPolicy !== "open",
     resolveGroupIntroHint: (): string | undefined =>
       "XMPP group chat. Mention the bot or use DM for commands.",
+    resolveToolPolicy: (params: {
+      cfg: OpenClawConfig;
+      groupId?: string | null;
+      accountId?: string | null;
+      senderId?: string | null;
+      senderName?: string | null;
+      senderUsername?: string | null;
+      senderE164?: string | null;
+    }): GroupToolPolicyConfig | undefined => {
+      const config = getConfig(params.cfg);
+      const accountConfig = params.accountId 
+        ? (config.accounts?.[params.accountId] ?? config)
+        : config;
+      
+      // Get groups config (keyed by room JID or "*" for default)
+      const groupsConfig: Record<string, XmppGroupConfig> | undefined = accountConfig.groups;
+      
+      if (!groupsConfig) return undefined;
+      
+      // First try specific group, then fallback to "*" default
+      const groupId = params.groupId ?? undefined;
+      const groupConfig: XmppGroupConfig | undefined = groupId ? groupsConfig[groupId] : undefined;
+      const defaultConfig: XmppGroupConfig | undefined = groupsConfig["*"];
+      
+      // Priority: sender-specific in group > group tools > sender-specific in default > default tools
+      // 1. Check sender-specific policy for this group
+      if (groupConfig?.toolsBySender) {
+        const senderPolicy = resolveToolsBySender({
+          toolsBySender: groupConfig.toolsBySender,
+          senderId: params.senderId ?? undefined,
+          senderName: params.senderName ?? undefined,
+          senderUsername: params.senderUsername ?? undefined,
+          senderE164: params.senderE164 ?? undefined,
+        });
+        if (senderPolicy) return senderPolicy;
+      }
+      
+      // 2. Check group-level tools policy
+      if (groupConfig?.tools) return groupConfig.tools;
+      
+      // 3. Check sender-specific policy for default group
+      if (defaultConfig?.toolsBySender) {
+        const senderPolicy = resolveToolsBySender({
+          toolsBySender: defaultConfig.toolsBySender,
+          senderId: params.senderId ?? undefined,
+          senderName: params.senderName ?? undefined,
+          senderUsername: params.senderUsername ?? undefined,
+          senderE164: params.senderE164 ?? undefined,
+        });
+        if (senderPolicy) return senderPolicy;
+      }
+      
+      // 4. Check default group tools policy
+      if (defaultConfig?.tools) return defaultConfig.tools;
+      
+      return undefined;
+    },
   },
 
   // Mentions adapter
@@ -444,6 +478,8 @@ export const xmppPlugin = {
       lastStopAt: runtime?.lastStopAt ?? null,
       lastConnectedAt: runtime?.lastConnectedAt ?? null,
       lastDisconnect: runtime?.lastDisconnect ?? null,
+      lastInboundAt: runtime?.lastInboundAt ?? null,
+      lastOutboundAt: runtime?.lastOutboundAt ?? null,
       lastError: runtime?.lastError ?? null,
       dmPolicy: account.config?.dmPolicy,
       allowFrom: account.config?.allowFrom,
@@ -451,4 +487,4 @@ export const xmppPlugin = {
   },
 };
 
-export { normalizeAllowFrom, isSenderAllowed, getConfig, isConfigured };
+export { getConfig, isConfigured };

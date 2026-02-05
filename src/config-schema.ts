@@ -13,6 +13,28 @@ export const XmppActionSchema = z.object({
 });
 
 /**
+ * Tool policy schema for group tool access control
+ */
+export const ToolPolicySchema = z.object({
+  /** Tools to explicitly allow */
+  allow: z.array(z.string()).optional(),
+  /** Tools to explicitly deny */
+  deny: z.array(z.string()).optional(),
+}).optional();
+
+/**
+ * Group-specific configuration schema
+ */
+export const XmppGroupConfigSchema = z.object({
+  /** Require @mention in this group */
+  requireMention: z.boolean().optional(),
+  /** Group-level tool access policy */
+  tools: ToolPolicySchema,
+  /** Per-sender tool access overrides */
+  toolsBySender: z.record(z.string(), ToolPolicySchema).optional(),
+});
+
+/**
  * XMPP account configuration schema
  */
 export const XmppAccountSchema = z.object({
@@ -34,8 +56,11 @@ export const XmppAccountSchema = z.object({
   /** XMPP server port */
   port: z.number().int().min(1).max(65535).optional().default(5222).describe("XMPP server port"),
 
-  /** XMPP resource identifier */
-  resource: z.string().optional().default("openclaw").describe("XMPP resource identifier"),
+  /** XMPP resource identifier (internal, auto-generated if not set) */
+  resource: z.string().optional().describe("XMPP resource identifier (auto-generated for uniqueness)"),
+
+  /** MUC nickname (what's shown in group chats) */
+  mucNick: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
 
   /** Direct message policy */
   dmPolicy: z.enum(["open", "pairing", "allowlist"]).optional().default("open").describe("Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom)"),
@@ -43,8 +68,11 @@ export const XmppAccountSchema = z.object({
   /** Group message policy */
   groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
 
-  /** Allowed sender JIDs */
-  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs (use * for all)"),
+  /** Allowed sender JIDs (for DMs) */
+  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for DMs (use * for all)"),
+
+  /** Allowed sender JIDs for groups */
+  groupAllowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for groups (defaults to allowFrom, use * for all)"),
 
   /** MUC rooms to join */
   mucs: z.array(z.string()).optional().describe("MUC rooms to join on startup"),
@@ -63,6 +91,9 @@ export const XmppAccountSchema = z.object({
 
   /** Heartbeat visibility */
   heartbeatVisibility: z.enum(["visible", "hidden"]).optional().describe("Heartbeat visibility in status"),
+
+  /** Per-group configuration (keyed by room JID or "*" for default) */
+  groups: z.record(z.string(), XmppGroupConfigSchema).optional().describe("Per-group configuration for tool policies and mentions"),
 });
 
 /**

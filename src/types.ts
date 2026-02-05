@@ -21,6 +21,28 @@ export interface XmppActionConfig {
 }
 
 /**
+ * Tool policy for group tool access control
+ */
+export interface XmppToolPolicy {
+  /** Tools to explicitly allow */
+  allow?: string[];
+  /** Tools to explicitly deny */
+  deny?: string[];
+}
+
+/**
+ * Per-group configuration
+ */
+export interface XmppGroupConfig {
+  /** Require @mention in this group */
+  requireMention?: boolean;
+  /** Group-level tool access policy */
+  tools?: XmppToolPolicy;
+  /** Per-sender tool access overrides */
+  toolsBySender?: Record<string, XmppToolPolicy>;
+}
+
+/**
  * XMPP channel configuration
  */
 export interface XmppConfig {
@@ -32,8 +54,10 @@ export interface XmppConfig {
   server?: string;
   /** XMPP server port (default: 5222) */
   port?: number;
-  /** XMPP resource identifier (default: openclaw) */
+  /** XMPP resource identifier (auto-generated for uniqueness) */
   resource?: string;
+  /** MUC nickname (what's shown in group chats) */
+  mucNick?: string;
   /** Account display name */
   name?: string;
   /** Whether this account is enabled */
@@ -42,8 +66,10 @@ export interface XmppConfig {
   dmPolicy?: DmPolicy;
   /** Group message policy */
   groupPolicy?: GroupPolicy;
-  /** Allowed sender JIDs */
+  /** Allowed sender JIDs (for DMs) */
   allowFrom?: string[];
+  /** Allowed sender JIDs for groups (if different from allowFrom) */
+  groupAllowFrom?: string[];
   /** MUC rooms to join */
   mucs?: string[];
   /** XEP-0363 HTTP File Upload endpoint (deprecated, use fileUploadService) */
@@ -56,6 +82,8 @@ export interface XmppConfig {
   messagePrefix?: string;
   /** Heartbeat visibility */
   heartbeatVisibility?: "visible" | "hidden";
+  /** Per-group configuration (keyed by room JID or "*" for default) */
+  groups?: Record<string, XmppGroupConfig>;
   /** Multi-account configuration */
   accounts?: Record<string, XmppConfig>;
 }
@@ -94,6 +122,10 @@ export interface XmppInboundMessage {
   isGroup: boolean;
   roomJid?: string;
   senderNick?: string;
+  /** XEP-0461: ID of message being replied to */
+  replyToId?: string;
+  /** XEP-0461: Body of message being replied to (from fallback) */
+  replyToBody?: string;
 }
 
 /**
@@ -108,6 +140,7 @@ export interface ChannelAccountStatusPatch {
   lastConnectedAt?: number | null;
   lastDisconnect?: number | null;
   lastError?: string | null;
+  lastInboundAt?: number | null;
   [key: string]: unknown;
 }
 
@@ -192,6 +225,8 @@ export interface ChannelAccountSnapshot {
   lastDisconnect?: number | null;
   lastMessageAt?: number | null;
   lastEventAt?: number | null;
+  lastInboundAt?: number | null;
+  lastOutboundAt?: number | null;
   lastError?: string | null;
   lastStartAt?: number | null;
   lastStopAt?: number | null;

@@ -1,15 +1,47 @@
+/**
+ * XMPP Connection Monitor
+ * 
+ * Main entry point for XMPP connection management.
+ * Handles connection lifecycle, message routing, and event dispatch.
+ */
+
 import { client, xml } from "@xmpp/client";
 import type { Element } from "@xmpp/client";
 import type { XmppConfig, GatewayStartContext, XmppInboundMessage, Logger } from "./types.js";
 import { resolveServer, extractUsername, bareJid } from "./config-schema.js";
-import { getXmppRuntime } from "./runtime.js";
-import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
 import { parsePepEvent, type PepItem } from "./pep.js";
-import { sendXmppMedia } from "./outbound.js";
-import * as fs from "fs";
-import * as path from "path";
 
-// PEP event handlers registry
+// Import from split modules
+import {
+  activeClients,
+  reconnectStates,
+  RECONNECT_BASE_DELAY_MS,
+  cleanupAccountState,
+} from "./state.js";
+import { joinMuc, getPersistedRooms } from "./rooms.js";
+import { startKeepalive, stopKeepalive } from "./keepalive.js";
+import {
+  registerStartXmppConnection,
+  initReconnectState,
+  clearReconnectState,
+  abortReconnect,
+  scheduleReconnect,
+} from "./reconnect.js";
+import { sendChatState, sendChatMarker } from "./chat-state.js";
+import { setupPresenceHandlers, setupMucInviteHandler } from "./stanza-handlers.js";
+import { handleInboundMessage } from "./inbound.js";
+
+// =============================================================================
+// RE-EXPORTS for backward compatibility
+// =============================================================================
+
+export { cleanupAccountState } from "./state.js";
+export { sendChatState, sendChatMarker } from "./chat-state.js";
+
+// =============================================================================
+// PEP EVENT HANDLERS
+// =============================================================================
+
 type PepEventHandler = (event: {
   accountId: string;
   from: string;
@@ -21,83 +53,44 @@ type PepEventHandler = (event: {
 
 const pepEventHandlers: PepEventHandler[] = [];
 
-// Active XMPP clients by accountId
-const activeClients = new Map<string, ReturnType<typeof client>>();
-
-// Track rooms that returned "gone" error to avoid retry loops
-const goneRooms = new Set<string>();
-
-// Track successfully joined rooms per account (in-memory cache)
-const joinedRooms = new Map<string, Set<string>>();
-
-// Persistent storage for dynamically joined rooms
-const ROOMS_STORE_FILENAME = "xmpp-rooms.json";
-
-interface RoomsStore {
-  rooms: Record<string, string[]>; // accountId -> room JIDs
+/**
+ * Register a PEP event handler
+ */
+export function registerPepEventHandler(handler: PepEventHandler): void {
+  pepEventHandlers.push(handler);
 }
 
-function getRoomsStorePath(): string {
-  // Store in OpenClaw extensions folder
-  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
-  return path.join(homeDir, ".openclaw", "extensions", "xmpp", ROOMS_STORE_FILENAME);
-}
-
-function loadPersistedRooms(log?: Logger): RoomsStore {
-  try {
-    const storePath = getRoomsStorePath();
-    if (fs.existsSync(storePath)) {
-      const data = fs.readFileSync(storePath, "utf-8");
-      return JSON.parse(data) as RoomsStore;
-    }
-  } catch (err) {
-    log?.warn?.(`[XMPP] Failed to load persisted rooms: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return { rooms: {} };
-}
-
-function savePersistedRooms(store: RoomsStore, log?: Logger): void {
-  try {
-    const storePath = getRoomsStorePath();
-    const dir = path.dirname(storePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
-    log?.debug?.(`[XMPP] Saved persisted rooms`);
-  } catch (err) {
-    log?.error?.(`[XMPP] Failed to save persisted rooms: ${err instanceof Error ? err.message : String(err)}`);
+/**
+ * Unregister a PEP event handler
+ */
+export function unregisterPepEventHandler(handler: PepEventHandler): void {
+  const index = pepEventHandlers.indexOf(handler);
+  if (index !== -1) {
+    pepEventHandlers.splice(index, 1);
   }
 }
 
-function addPersistedRoom(accountId: string, roomJid: string, log?: Logger): void {
-  const store = loadPersistedRooms(log);
-  if (!store.rooms[accountId]) {
-    store.rooms[accountId] = [];
-  }
-  if (!store.rooms[accountId].includes(roomJid)) {
-    store.rooms[accountId].push(roomJid);
-    savePersistedRooms(store, log);
-    log?.info?.(`[XMPP] Persisted room ${roomJid} for account ${accountId}`);
-  }
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Generate unique session ID for XMPP resource (prevents connection conflicts on restart)
+ */
+function generateSessionId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 }
 
-function removePersistedRoom(accountId: string, roomJid: string, log?: Logger): void {
-  const store = loadPersistedRooms(log);
-  if (store.rooms[accountId]) {
-    const idx = store.rooms[accountId].indexOf(roomJid);
-    if (idx !== -1) {
-      store.rooms[accountId].splice(idx, 1);
-      savePersistedRooms(store, log);
-      log?.info?.(`[XMPP] Removed persisted room ${roomJid} for account ${accountId}`);
-    }
-  }
+/**
+ * Get active client for an account
+ */
+export function getActiveClient(accountId: string): ReturnType<typeof client> | undefined {
+  return activeClients.get(accountId);
 }
 
-function getPersistedRooms(accountId: string, log?: Logger): string[] {
-  const store = loadPersistedRooms(log);
-  return store.rooms[accountId] || [];
-}
+// =============================================================================
+// MAIN CONNECTION FUNCTION
+// =============================================================================
 
 /**
  * Start XMPP connection for an account
@@ -105,11 +98,9 @@ function getPersistedRooms(accountId: string, log?: Logger): string[] {
  */
 export async function startXmppConnection(ctx: GatewayStartContext): Promise<void> {
   const { account, cfg, abortSignal, log, setStatus } = ctx;
-  // Use ctx.accountId if available, otherwise fall back to account.accountId
   const accountId = ctx.accountId ?? account.accountId ?? "default";
   const config = account.config;
 
-  // Debug: log context properties
   log?.debug?.(`[${accountId}] Gateway context: hasSetStatus=${!!setStatus}`);
 
   if (!config.jid || !config.password) {
@@ -118,11 +109,16 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
 
   const server = resolveServer(config);
   const username = extractUsername(config.jid);
-  const resource = config.resource ?? "openclaw";
+  
+  // Generate unique resource per session to prevent connection conflicts on restart
+  const sessionResource = config.resource ?? `openclaw-${generateSessionId()}`;
+  
+  // MUC nick is what users see in group chats
+  const mucNick = config.mucNick ?? username;
 
-  log?.info?.(`[${accountId}] Starting XMPP connection to ${server}...`);
+  log?.info?.(`[${accountId}] Starting XMPP connection to ${server} (resource=${sessionResource}, mucNick=${mucNick})...`);
 
-  // Mark as starting - use setStatus if available
+  // Mark as starting
   if (setStatus) {
     log?.debug?.(`[${accountId}] setStatus: running=true`);
     setStatus({
@@ -140,23 +136,173 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     domain: server,
     username,
     password: config.password,
-    resource,
+    resource: sessionResource,
   });
 
   // Store client for outbound messaging
   activeClients.set(accountId, xmpp);
 
-  // Handle incoming stanzas (messages)
+  // XEP-0198 Stream Management event handlers
+  const streamManagement = (xmpp as unknown as { streamManagement?: {
+    on: (event: string, handler: (stanza?: Element) => void) => void;
+  } }).streamManagement;
+  
+  if (streamManagement) {
+    streamManagement.on("resumed", () => {
+      log?.info?.(`[${accountId}] XEP-0198 Stream Management: session resumed`);
+      setStatus?.({ accountId, connected: true, lastConnectedAt: Date.now() });
+    });
+    
+    streamManagement.on("fail", (stanza) => {
+      log?.warn?.(`[${accountId}] XEP-0198 Stream Management: stanza failed to send: ${stanza?.toString()?.slice(0, 100)}`);
+    });
+    
+    streamManagement.on("ack", () => {
+      log?.debug?.(`[${accountId}] XEP-0198 Stream Management: stanza acknowledged`);
+    });
+  }
+
+  // Setup message stanza handler
+  setupMessageHandler(xmpp, accountId, mucNick, cfg, config, log, setStatus);
+
+  // Setup presence handlers (subscriptions, MUC self-presence, errors)
+  setupPresenceHandlers(xmpp, accountId, log);
+
+  // Setup MUC invite handler
+  setupMucInviteHandler(xmpp, accountId, mucNick, log);
+
+  // Connection events
+  xmpp.on("online", async (address) => {
+    log?.info?.(`[${accountId}] XMPP online as ${address.toString()}`);
+    
+    // Start XEP-0199 keepalive pings
+    startKeepalive(xmpp, accountId, server, log);
+    
+    // Send initial presence
+    const initialPresence = xml("presence", {}, 
+      xml("status", {}, "OpenClaw Bot Online"),
+      xml("priority", {}, "1")
+    );
+    try {
+      await xmpp.send(initialPresence);
+      log?.debug?.(`[${accountId}] XMPP initial presence sent`);
+    } catch (err) {
+      log?.error?.(`[${accountId}] XMPP failed to send initial presence: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    
+    // Mark as connected
+    setStatus?.({
+      accountId,
+      running: true,
+      connected: true,
+      lastConnectedAt: Date.now(),
+      lastError: null,
+    });
+
+    // Join MUC rooms from config
+    if (config.mucs && config.mucs.length > 0) {
+      for (const muc of config.mucs) {
+        await joinMuc(xmpp, muc, mucNick, log, accountId, true);
+      }
+    }
+    
+    // Join persisted rooms (from previous invites)
+    const persistedRooms = getPersistedRooms(accountId, log);
+    for (const roomJid of persistedRooms) {
+      if (config.mucs?.includes(roomJid)) continue;
+      log?.info?.(`[${accountId}] Rejoining persisted room: ${roomJid}`);
+      await joinMuc(xmpp, roomJid, mucNick, log, accountId, true);
+    }
+  });
+
+  xmpp.on("offline", () => {
+    log?.info?.(`[${accountId}] XMPP offline`);
+    
+    stopKeepalive(accountId);
+    
+    setStatus?.({
+      accountId,
+      running: true,
+      connected: false,
+      lastDisconnect: Date.now(),
+    });
+    
+    const reconnectState = reconnectStates.get(accountId);
+    if (!reconnectState?.aborted) {
+      scheduleReconnect(accountId, ctx, log);
+    }
+  });
+
+  xmpp.on("error", (err) => {
+    log?.error?.(`[${accountId}] XMPP error: ${err.message}`);
+    setStatus?.({ accountId, lastError: err.message });
+  });
+
+  // Start connection
+  try {
+    await xmpp.start();
+    clearReconnectState(accountId);
+  } catch (err) {
+    log?.error?.(`[${accountId}] XMPP connection failed: ${err instanceof Error ? err.message : String(err)}`);
+    setStatus?.({ accountId, lastError: err instanceof Error ? err.message : String(err) });
+    scheduleReconnect(accountId, ctx, log);
+  }
+
+  // Return a promise that stays pending until the connection is stopped
+  return new Promise<void>((resolve) => {
+    initReconnectState(accountId);
+    
+    const cleanup = () => {
+      const state = reconnectStates.get(accountId);
+      if (state?.aborted) return;
+      
+      abortReconnect(accountId);
+      
+      log?.info?.(`[${accountId}] Stopping XMPP connection...`);
+      
+      stopKeepalive(accountId);
+      xmpp.stop();
+      activeClients.delete(accountId);
+      
+      setStatus?.({
+        accountId,
+        running: false,
+        connected: false,
+        lastStopAt: Date.now(),
+      });
+      
+      resolve();
+    };
+
+    abortSignal?.addEventListener("abort", cleanup);
+  });
+}
+
+// Register this function for reconnect module (avoids circular dependency)
+registerStartXmppConnection(startXmppConnection);
+
+// =============================================================================
+// MESSAGE STANZA HANDLER
+// =============================================================================
+
+function setupMessageHandler(
+  xmpp: ReturnType<typeof client>,
+  accountId: string,
+  mucNick: string,
+  cfg: unknown,
+  config: XmppConfig,
+  log?: Logger,
+  setStatus?: GatewayStartContext["setStatus"]
+): void {
   xmpp.on("stanza", async (stanza) => {
     log?.debug?.(`[${accountId}] XMPP stanza received: attrs=${JSON.stringify(stanza.attrs)}`);
     
     if (!stanza.is("message")) return;
 
-    // Check for PEP events first (message with event element)
+    // Check for PEP events first
     const pepEvent = parsePepEvent(stanza as Element);
     if (pepEvent) {
       log?.debug?.(`[${accountId}] PEP event from ${pepEvent.from}: node=${pepEvent.node}, items=${pepEvent.items.length}`);
-      // Dispatch to registered PEP handlers
       for (const handler of pepEventHandlers) {
         try {
           await handler({
@@ -171,15 +317,15 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
           log?.error?.(`[${accountId}] PEP handler error: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      return; // PEP events don't have a body to process as chat
+      return;
     }
 
     const body = stanza.getChildText("body");
     log?.debug?.(`[${accountId}] XMPP message stanza: body=${body ? `"${body.slice(0, 50)}"` : "null"}`);
     
-    if (!body) return; // Skip messages without body (e.g., typing indicators)
+    if (!body) return;
 
-    // Skip history messages (MUC sends old messages with delay element on join)
+    // Skip history messages
     const delay = stanza.getChild("delay", "urn:xmpp:delay") || stanza.getChild("x", "jabber:x:delay");
     if (delay) {
       log?.debug?.(`[${accountId}] XMPP skipping history message (has delay element)`);
@@ -191,26 +337,49 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     const type = stanza.attrs.type || "chat";
     const id = stanza.attrs.id || `msg_${Date.now()}`;
 
-    // Parse MUC vs direct message
     const isGroup = type === "groupchat";
     let senderJid = from;
     let roomJid: string | undefined;
     let senderNick: string | undefined;
 
     if (isGroup) {
-      // In MUC, from is "room@conference/nick"
       roomJid = bareJid(from);
       senderNick = from.split("/")[1];
       
-      // Skip self-messages in MUC (echoes of our own messages)
-      if (senderNick === resource) {
+      // Skip self-messages in MUC
+      if (senderNick === mucNick) {
         log?.debug?.(`[${accountId}] XMPP skipping self-message in MUC (nick=${senderNick})`);
         return;
       }
     }
 
-    // Log the inbound message AFTER filtering
     log?.info?.(`[${accountId}] XMPP inbound message: from=${from} type=${type}`);
+
+    // XEP-0461: Parse reply context
+    let replyToId: string | undefined;
+    let replyToBody: string | undefined;
+    
+    const replyElement = stanza.getChild("reply", "urn:xmpp:reply:0");
+    if (replyElement) {
+      replyToId = replyElement.attrs.id;
+      log?.debug?.(`[${accountId}] XEP-0461 reply to message: ${replyToId}`);
+      
+      const fallbackElement = stanza.getChild("fallback", "urn:xmpp:fallback:0");
+      if (fallbackElement && body) {
+        const lines = body.split("\n");
+        const quotedLines: string[] = [];
+        for (const line of lines) {
+          if (line.startsWith(">")) {
+            quotedLines.push(line.slice(1).trim());
+          } else {
+            break;
+          }
+        }
+        if (quotedLines.length > 0) {
+          replyToBody = quotedLines.join("\n");
+        }
+      }
+    }
 
     const message: XmppInboundMessage = {
       id,
@@ -222,472 +391,10 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       isGroup,
       roomJid,
       senderNick,
+      replyToId,
+      replyToBody,
     };
 
-    await handleInboundMessage(message, cfg, accountId, config, log);
+    await handleInboundMessage(message, cfg, accountId, config, log, setStatus);
   });
-
-  // Handle presence stanzas (subscription requests, probes)
-  xmpp.on("stanza", async (stanza) => {
-    if (!stanza.is("presence")) return;
-    
-    const type = stanza.attrs.type;
-    const from = stanza.attrs.from;
-    
-    if (!from) return;
-    
-    const fromBare = bareJid(from);
-    
-    // Handle subscription requests - auto-approve
-    if (type === "subscribe") {
-      log?.info?.(`[${accountId}] XMPP presence subscribe from ${fromBare} - auto-approving`);
-      
-      // Send subscribed (approve their request)
-      const subscribed = xml("presence", { to: fromBare, type: "subscribed" });
-      await xmpp.send(subscribed);
-      
-      // Also subscribe back to them (mutual subscription)
-      const subscribe = xml("presence", { to: fromBare, type: "subscribe" });
-      await xmpp.send(subscribe);
-      
-      log?.debug?.(`[${accountId}] XMPP sent subscribed + subscribe to ${fromBare}`);
-    }
-    
-    // Handle probe - respond with current presence
-    if (type === "probe") {
-      log?.debug?.(`[${accountId}] XMPP presence probe from ${fromBare} - responding`);
-      const presence = xml("presence", { to: fromBare });
-      await xmpp.send(presence);
-    }
-    
-    // Handle unsubscribe - acknowledge it
-    if (type === "unsubscribe") {
-      log?.info?.(`[${accountId}] XMPP presence unsubscribe from ${fromBare}`);
-      const unsubscribed = xml("presence", { to: fromBare, type: "unsubscribed" });
-      await xmpp.send(unsubscribed);
-    }
-    
-    // Handle presence errors (e.g., MUC join failures)
-    if (type === "error") {
-      const errorEl = stanza.getChild("error");
-      const errorType = errorEl?.attrs?.type || "unknown";
-      // Get the first child element that isn't "text" as the error condition
-      const errorCondition = errorEl?.children
-        ?.filter((c): c is Element => typeof c !== "string" && c.name !== "text")
-        ?.[0]?.name || "unknown";
-      const errorText = errorEl?.getChildText("text") || "";
-      log?.error?.(`[${accountId}] XMPP presence error from ${from}: type=${errorType} condition=${errorCondition} text="${errorText}"`);
-      
-      // Track "gone" rooms so we don't keep trying to rejoin
-      if (errorCondition === "gone") {
-        const roomJid = bareJid(from);
-        goneRooms.add(roomJid);
-        // Remove from persistence so we don't try to rejoin after restart
-        removePersistedRoom(accountId, roomJid, log);
-        log?.warn?.(`[${accountId}] Room ${roomJid} no longer exists, removed from persisted rooms`);
-      }
-    }
-  });
-
-  // Handle MUC invites (mediated invites from room)
-  xmpp.on("stanza", async (stanza) => {
-    if (!stanza.is("message")) return;
-    
-    const from = stanza.attrs.from;
-    if (!from) return;
-    
-    // Check for MUC mediated invite: <x xmlns="http://jabber.org/protocol/muc#user"><invite from="...">...
-    const mucUserX = stanza.getChild("x", "http://jabber.org/protocol/muc#user");
-    if (!mucUserX) return;
-    
-    const invite = mucUserX.getChild("invite");
-    if (!invite) return;
-    
-    const roomJid = bareJid(from);
-    const inviterJid = bareJid(invite.attrs.from || "");
-    const reason = invite.getChildText("reason") || "No reason provided";
-    
-    // If we receive an invite, the room exists - clear any "gone" status
-    if (goneRooms.has(roomJid)) {
-      log?.info?.(`[${accountId}] Room ${roomJid} was recreated, clearing gone status`);
-      goneRooms.delete(roomJid);
-    }
-    
-    log?.info?.(`[${accountId}] MUC invite: room=${roomJid} from=${inviterJid} reason="${reason}"`);
-    
-    // Auto-accept the invite by joining the room
-    const nick = resource;
-    log?.debug?.(`[${accountId}] Auto-joining ${roomJid} as ${nick}`);
-    
-    try {
-      // Send presence to join the room
-      const joinPresence = xml(
-        "presence",
-        { to: `${roomJid}/${nick}` },
-        xml("x", { xmlns: "http://jabber.org/protocol/muc" })
-      );
-      await xmpp.send(joinPresence);
-      log?.debug?.(`[${accountId}] Sent join presence to ${roomJid}`);
-      
-      // Track as joined (in-memory)
-      if (!joinedRooms.has(accountId)) {
-        joinedRooms.set(accountId, new Set());
-      }
-      joinedRooms.get(accountId)!.add(roomJid);
-      
-      // Persist the room so we rejoin after restart
-      addPersistedRoom(accountId, roomJid, log);
-      
-      // Send acknowledgment message to inviter via DM
-      if (inviterJid) {
-        const ackMsg = xml(
-          "message",
-          { to: inviterJid, type: "chat" },
-          xml("body", {}, `Joined ${roomJid} — thanks for the invite!`)
-        );
-        await xmpp.send(ackMsg);
-        log?.debug?.(`[${accountId}] Sent ack to ${inviterJid}`);
-      }
-      
-      // Also send a greeting to the room (wait for join to complete)
-      setTimeout(async () => {
-        try {
-          const greeting = xml(
-            "message",
-            { to: roomJid, type: "groupchat" },
-            xml("body", {}, `[${accountId}] has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
-          );
-          await xmpp.send(greeting);
-          log?.debug?.(`[${accountId}] Sent greeting to room ${roomJid}`);
-        } catch (err) {
-          log?.error?.(`[${accountId}] Failed to send room greeting: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }, 1000);
-    } catch (err) {
-      log?.error?.(`[${accountId}] Failed to join room ${roomJid}: ${err instanceof Error ? err.message : String(err)}`);
-      
-      // Notify inviter of failure
-      if (inviterJid) {
-        const failMsg = xml(
-          "message",
-          { to: inviterJid, type: "chat" },
-          xml("body", {}, `Sorry, I couldn't join ${roomJid}: ${err instanceof Error ? err.message : "unknown error"}`)
-        );
-        await xmpp.send(failMsg).catch(() => {}); // Ignore errors here
-      }
-    }
-  });
-
-  // Connection events
-  xmpp.on("online", (address) => {
-    log?.info?.(`[${accountId}] XMPP online as ${address.toString()}`);
-    
-    // Send initial presence to indicate we're online and available
-    const initialPresence = xml("presence", {}, 
-      xml("status", {}, "OpenClaw Bot Online"),
-      xml("priority", {}, "1")
-    );
-    xmpp.send(initialPresence).then(() => {
-      log?.debug?.(`[${accountId}] XMPP initial presence sent`);
-    }).catch((err) => {
-      log?.error?.(`[${accountId}] XMPP failed to send initial presence: ${err.message}`);
-    });
-    
-    // Mark as connected
-    setStatus?.({
-      accountId,
-      running: true,
-      connected: true,
-      lastConnectedAt: Date.now(),
-      lastError: null,
-    });
-
-    // Join MUC rooms from config
-    if (config.mucs && config.mucs.length > 0) {
-      for (const muc of config.mucs) {
-        joinMuc(xmpp, muc, resource, log, accountId);
-      }
-    }
-    
-    // Join persisted rooms (from previous invites)
-    const persistedRooms = getPersistedRooms(accountId, log);
-    for (const roomJid of persistedRooms) {
-      // Skip if already in config (avoid duplicate joins)
-      if (config.mucs?.includes(roomJid)) continue;
-      log?.info?.(`[${accountId}] Rejoining persisted room: ${roomJid}`);
-      joinMuc(xmpp, roomJid, resource, log, accountId);
-    }
-  });
-
-  xmpp.on("offline", () => {
-    log?.info?.(`[${accountId}] XMPP offline`);
-    
-    // Mark as disconnected
-    setStatus?.({
-      accountId,
-      running: false,
-      connected: false,
-      lastDisconnect: Date.now(),
-    });
-  });
-
-  xmpp.on("error", (err) => {
-    log?.error?.(`[${accountId}] XMPP error: ${err.message}`);
-    
-    // Record the error
-    setStatus?.({
-      accountId,
-      lastError: err.message,
-    });
-  });
-
-  // Start connection
-  await xmpp.start();
-
-  // Return a promise that stays pending until the connection is stopped
-  // This keeps the gateway task alive - if we return immediately, 
-  // OpenClaw's channel manager will think the channel has stopped
-  return new Promise<void>((resolve) => {
-    let stopped = false;
-    
-    const cleanup = () => {
-      if (stopped) return;
-      stopped = true;
-      log?.info?.(`[${accountId}] Stopping XMPP connection...`);
-      xmpp.stop();
-      activeClients.delete(accountId);
-      
-      // Mark as stopped
-      setStatus?.({
-        accountId,
-        running: false,
-        connected: false,
-        lastStopAt: Date.now(),
-      });
-      
-      resolve();
-    };
-
-    // Handle abort signal for graceful shutdown
-    abortSignal?.addEventListener("abort", cleanup);
-    
-    // Also handle xmpp offline event to resolve the promise
-    xmpp.on("offline", () => {
-      if (!stopped) {
-        cleanup();
-      }
-    });
-  });
-}
-
-/**
- * Join a MUC room
- */
-function joinMuc(
-  xmpp: ReturnType<typeof client>,
-  roomJid: string,
-  nick: string,
-  log?: Logger,
-  accountId?: string
-): void {
-  // Skip rooms that have returned "gone" error
-  if (goneRooms.has(roomJid)) {
-    log?.debug?.(`[XMPP] Skipping gone room: ${roomJid}`);
-    return;
-  }
-
-  log?.debug?.(`[XMPP] Joining MUC: ${roomJid}`);
-
-  const presence = xml(
-    "presence",
-    { to: `${roomJid}/${nick}` },
-    xml("x", { xmlns: "http://jabber.org/protocol/muc" })
-  );
-
-  xmpp.send(presence).then(() => {
-    // Track as joined (will be confirmed by presence from room)
-    if (accountId) {
-      if (!joinedRooms.has(accountId)) {
-        joinedRooms.set(accountId, new Set());
-      }
-      joinedRooms.get(accountId)!.add(roomJid);
-    }
-  }).catch((err) => {
-    log?.error?.(`[XMPP] Failed to join MUC ${roomJid}: ${err.message}`);
-  });
-}
-
-/**
- * Handle inbound message
- */
-async function handleInboundMessage(
-  message: XmppInboundMessage,
-  cfg: unknown,
-  accountId: string,
-  config: XmppConfig,
-  log?: Logger
-): Promise<void> {
-  const rt = getXmppRuntime();
-
-  // Check allowlist
-  const allowFrom = normalizeAllowFrom(config.allowFrom);
-  const senderBare = bareJid(message.from);
-
-  if (!isSenderAllowed(allowFrom, senderBare)) {
-    log?.debug?.(`[XMPP] Message blocked: ${senderBare} not in allowlist`);
-    return;
-  }
-
-  log?.info?.(`[XMPP] Inbound: from=${senderBare} body="${message.body.slice(0, 50)}..."`);
-
-  // Route to OpenClaw
-  const route = rt.channel.routing.resolveAgentRoute({
-    cfg,
-    channel: "xmpp",
-    accountId,
-    peer: {
-      kind: message.isGroup ? "group" : "dm",
-      id: message.isGroup ? message.roomJid! : senderBare,
-    },
-  });
-
-  log?.debug?.(`[XMPP] Route: ${route.sessionKey} agent=${route.agentId}`);
-
-  const storePath = rt.channel.session.resolveStorePath((cfg as any).session?.store, {
-    agentId: route.agentId,
-  });
-
-  // Build the message context using finalizeInboundContext (same pattern as other channels)
-  const ctx = rt.channel.reply.finalizeInboundContext({
-    Body: message.body,
-    RawBody: message.body,
-    CommandBody: message.body,
-    From: `xmpp:${senderBare}`,
-    To: `xmpp:${message.to}`,
-    SessionKey: route.sessionKey,
-    AccountId: accountId,
-    ChatType: message.isGroup ? "group" : "direct",
-    ConversationLabel: message.isGroup ? message.roomJid : senderBare,
-    SenderName: message.senderNick || senderBare.split("@")[0],
-    SenderId: senderBare,
-    Provider: "xmpp",
-    Surface: "xmpp",
-    MessageSid: message.id || `xmpp-${Date.now()}`,
-    OriginatingChannel: "xmpp" as const,
-    OriginatingTo: `xmpp:${message.isGroup ? message.roomJid : senderBare}`,
-  });
-
-  await rt.channel.session.recordInboundSession({
-    storePath,
-    sessionKey: ctx.SessionKey ?? route.sessionKey,
-    ctx,
-    // Only update lastRoute for DMs, not groups (to avoid main session showing as group)
-    updateLastRoute: message.isGroup ? undefined : {
-      sessionKey: route.mainSessionKey,
-      channel: "xmpp",
-      to: senderBare,
-      accountId,
-    },
-    onRecordError: (err: unknown) => {
-      log?.error?.(`[XMPP] Failed to record inbound session: ${String(err)}`);
-    },
-  });
-
-  // Dispatch reply
-  await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-    ctx,
-    cfg,
-    dispatcherOptions: {
-      responsePrefix: "",
-      deliver: async (payload: { text?: string; markdown?: string; mediaUrl?: string; mediaUrls?: string[] }) => {
-        log?.debug?.(`[XMPP] Deliver: text=${!!payload.text} markdown=${!!payload.markdown} media=${!!(payload.mediaUrl || payload.mediaUrls?.length)}`);
-        
-        const xmppClient = activeClients.get(accountId);
-        if (!xmppClient) {
-          log?.error?.("[XMPP] No active client for reply");
-          return;
-        }
-
-        const replyTo = message.isGroup ? message.roomJid! : senderBare;
-        const msgType = message.isGroup ? "groupchat" : "chat";
-        const textToSend = payload.markdown || payload.text;
-        
-        // Collect all media URLs
-        const allMediaUrls: string[] = [];
-        if (payload.mediaUrl) {
-          allMediaUrls.push(payload.mediaUrl);
-        }
-        if (payload.mediaUrls && payload.mediaUrls.length > 0) {
-          allMediaUrls.push(...payload.mediaUrls);
-        }
-        
-        // If we have media URLs, use HTTP Upload
-        if (allMediaUrls.length > 0) {
-          log?.debug?.(`[XMPP] Sending ${allMediaUrls.length} media item(s) to ${replyTo}`);
-          
-          for (let i = 0; i < allMediaUrls.length; i++) {
-            const mediaUrl = allMediaUrls[i];
-            // Only include caption on first media
-            const caption = i === 0 ? textToSend : undefined;
-            
-            log?.debug?.(`[XMPP] Media ${i + 1}/${allMediaUrls.length}: ${mediaUrl.slice(0, 80)}`);
-            
-            const result = await sendXmppMedia(config, replyTo, mediaUrl, caption, {
-              log,
-              accountId,
-            });
-            
-            if (!result.ok) {
-              log?.error?.(`[XMPP] Failed to send media: ${result.error}`);
-            } else {
-              log?.debug?.(`[XMPP] Media sent to ${replyTo}`);
-            }
-          }
-          return;
-        }
-        
-        // No media, send text only
-        if (!textToSend) {
-          log?.debug?.("[XMPP] No text or media to send, skipping");
-          return;
-        }
-        
-        log?.info?.(`[XMPP] Reply to ${replyTo}: ${textToSend.slice(0, 50)}...`);
-
-        const reply = xml(
-          "message",
-          { to: replyTo, type: msgType },
-          xml("body", {}, textToSend)
-        );
-
-        await xmppClient.send(reply);
-        log?.debug?.(`[XMPP] Sent to ${replyTo}`);
-      },
-    },
-  });
-}
-
-/**
- * Get active client for an account
- */
-export function getActiveClient(accountId: string): ReturnType<typeof client> | undefined {
-  return activeClients.get(accountId);
-}
-
-/**
- * Register a PEP event handler
- * Handlers are called when PEP notifications are received
- */
-export function registerPepEventHandler(handler: PepEventHandler): void {
-  pepEventHandlers.push(handler);
-}
-
-/**
- * Unregister a PEP event handler
- */
-export function unregisterPepEventHandler(handler: PepEventHandler): void {
-  const index = pepEventHandlers.indexOf(handler);
-  if (index !== -1) {
-    pepEventHandlers.splice(index, 1);
-  }
 }

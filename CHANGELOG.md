@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-04
+
+### Added
+
+- **XEP-0085 Chat State Notifications**
+  - Send `composing` indicator before AI response
+  - Send `active` indicator after response delivery
+
+- **XEP-0333 Chat Markers**
+  - Send read receipts (`received`, `displayed`, `acknowledged`)
+
+- **XEP-0198 Stream Management**
+  - Automatic stanza acknowledgment
+  - Session resume on reconnect
+  - Failed stanza detection
+
+- **XEP-0199 XMPP Ping**
+  - 30-second keepalive interval
+  - Automatic ping to server
+
+- **XEP-0461 Message Replies**
+  - Include reply context in outbound messages
+  - Parse reply references from inbound messages
+  - Fallback support for older clients
+
+- **MUC Improvements**
+  - Self-presence detection (status code 110) for reliable join confirmation
+  - Auto-accept and join on invite with greeting message
+  - Room persistence across restarts
+  - Per-room tool policies (`groups.<roomJid>.tools`)
+  - Per-room `requireMention` setting
+  - Separate `groupAllowFrom` for group message filtering
+
+- **Connection Reliability**
+  - Exponential backoff reconnection (1s to 60s, max 20 attempts)
+  - `lastOutboundAt` tracking for status monitoring
+  - Unique session resources to prevent connection conflicts
+
+### Changed
+
+- **Modular Architecture** — Split 1200-line `monitor.ts` into focused modules:
+  - `state.ts` — Global state maps and constants
+  - `rooms.ts` — MUC room management and persistence
+  - `keepalive.ts` — XEP-0199 ping management
+  - `reconnect.ts` — Exponential backoff logic
+  - `chat-state.ts` — Typing indicators and read receipts
+  - `stanza-handlers.ts` — Presence and invite handlers
+  - `inbound.ts` — Message routing to OpenClaw
+
+### Fixed
+
+- Removed duplicate `normalizeAllowFrom`/`isSenderAllowed` functions
+- Added proper TypeScript interfaces for `XmppToolPolicy` and `XmppGroupConfig`
+- Extracted magic numbers to named constants
+- Silenced harmless `recipient-unavailable` presence errors
+- Proper cleanup of pending MUC joins on account stop
+
 ## [0.1.0] - 2026-02-03
 
 ### Added
