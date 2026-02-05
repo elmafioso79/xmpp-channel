@@ -39,28 +39,31 @@ openclaw plugins install github:elmafioso79/xmpp-channel
    npm install
    npm run build
    ```
-3. Add to your `openclaw.json`:
-
-```json
-{
-  "channels": {
-    "xmpp": {
-      "enabled": true,
-      "jid": "bot@example.com",
-      "password": "your-password",
-      "server": "example.com",
-      "port": 5222,
-      "dmPolicy": "pairing",
-      "allowFrom": ["user1@example.com", "user2@example.com"],
-      "mucs": ["room@conference.example.com"],
-      "actions": {
-        "reactions": true
-      }
-    }
-  }
-}
-```
-
+3. Configure with openclaw or add to your `openclaw.json`:
+   ```
+   json
+   {
+     "channels": {
+       "xmpp": {
+         "enabled": true,
+         "jid": "bot@example.com",
+         "password": "your-password",
+         "server": "example.com",
+         "port": 5222,
+         "dmPolicy": "pairing",
+         "allowFrom": ["user1@example.com", "user2@example.com"],
+         "mucs": ["room@conference.example.com"],
+         "actions": {
+         "reactions": true
+         }
+       }
+     }
+   }
+   ```
+4. Enable plugin
+   ```bash
+   openclaw plugins enable xmpp 
+   ```
 ### Configuration Options
 
 | Option | Type | Default | Description |
@@ -139,7 +142,7 @@ The agent can then use the `react` action to add/remove reactions to messages.
 Run the onboarding wizard:
 
 ```bash
-openclaw channels add xmpp
+openclaw channels add
 ```
 
 Check channel status:
@@ -154,7 +157,6 @@ openclaw channels status
 npm install          # Install dependencies
 npm run build        # Compile TypeScript
 npm run dev          # Watch mode
-npm test             # Run tests
 ```
 
 ## Architecture
