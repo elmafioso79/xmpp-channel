@@ -26,6 +26,8 @@ export interface XmppActionConfig {
 export interface XmppToolPolicy {
   /** Tools to explicitly allow */
   allow?: string[];
+  /** Tools to add to an existing allow list */
+  alsoAllow?: string[];
   /** Tools to explicitly deny */
   deny?: string[];
 }

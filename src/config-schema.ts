@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import type { ChannelConfigSchema } from "openclaw/plugin-sdk";
+import { buildChannelConfigSchema } from "openclaw/plugin-sdk";
 
 /**
  * XMPP action configuration schema
@@ -18,9 +17,11 @@ export const XmppActionSchema = z.object({
 export const ToolPolicySchema = z.object({
   /** Tools to explicitly allow */
   allow: z.array(z.string()).optional(),
+  /** Tools to add to an existing allow list */
+  alsoAllow: z.array(z.string()).optional(),
   /** Tools to explicitly deny */
   deny: z.array(z.string()).optional(),
-}).optional();
+});
 
 /**
  * Group-specific configuration schema
@@ -29,9 +30,9 @@ export const XmppGroupConfigSchema = z.object({
   /** Require @mention in this group */
   requireMention: z.boolean().optional(),
   /** Group-level tool access policy */
-  tools: ToolPolicySchema,
+  tools: ToolPolicySchema.optional(),
   /** Per-sender tool access overrides */
-  toolsBySender: z.record(z.string(), ToolPolicySchema).optional(),
+  toolsBySender: z.record(z.string(), ToolPolicySchema.optional()).optional(),
 });
 
 /**
@@ -107,15 +108,10 @@ export const XmppConfigSchema = XmppAccountSchema.extend({
 export type XmppConfigSchemaType = z.infer<typeof XmppConfigSchema>;
 
 /**
- * Convert Zod schema to JSON Schema for OpenClaw plugin system
+ * Build channel config schema using OpenClaw SDK helper
  */
-export function xmppChannelConfigSchema(): ChannelConfigSchema {
-  return {
-    schema: zodToJsonSchema(XmppConfigSchema, {
-      target: "jsonSchema7",
-      $refStrategy: "none",
-    }) as Record<string, unknown>,
-  };
+export function xmppChannelConfigSchema() {
+  return buildChannelConfigSchema(XmppConfigSchema);
 }
 
 /**

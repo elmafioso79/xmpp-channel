@@ -46,8 +46,7 @@
     "@xmpp/client": "^0.13.1",
     "@xmpp/debug": "^0.13.1",
     "mime-types": "^3.0.2",
-    "zod": "^3.22.0",
-    "zod-to-json-schema": "^3.22.0"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/mime-types": "^3.0.1",
