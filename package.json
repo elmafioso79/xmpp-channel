@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/xmpp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "XMPP channel plugin for OpenClaw (Prosody, ejabberd, and other XMPP servers)",
   "type": "module",
   "main": "dist/index.js",
@@ -43,6 +43,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
     "@xmpp/client": "^0.13.1",
     "@xmpp/debug": "^0.13.1",
     "mime-types": "^3.0.2"

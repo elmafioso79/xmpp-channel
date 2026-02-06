@@ -31,6 +31,16 @@ import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { setupPresenceHandlers, setupMucInviteHandler } from "./stanza-handlers.js";
 import { handleInboundMessage } from "./inbound.js";
 
+// OMEMO imports
+import {
+  initializeOmemo,
+  isOmemoEnabled,
+  isOmemoEncrypted,
+  decryptOmemoMessage,
+  shutdownOmemo,
+  handleDeviceListPepEvent,
+} from "./omemo/index.js";
+
 // =============================================================================
 // RE-EXPORTS for backward compatibility
 // =============================================================================
@@ -69,6 +79,14 @@ export function unregisterPepEventHandler(handler: PepEventHandler): void {
     pepEventHandlers.splice(index, 1);
   }
 }
+
+// =============================================================================
+// REGISTER OMEMO PEP HANDLERS
+// =============================================================================
+
+// Register the device list PEP handler for OMEMO multi-device sync
+// This is registered globally and handles events for all accounts
+registerPepEventHandler(handleDeviceListPepEvent);
 
 // =============================================================================
 // UTILITY FUNCTIONS
@@ -178,6 +196,19 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     // Start XEP-0199 keepalive pings
     startKeepalive(xmpp, accountId, server, log);
     
+    // Enable XEP-0280 Message Carbons
+    try {
+      const enableCarbons = xml(
+        "iq",
+        { type: "set", id: `carbons-${Date.now()}` },
+        xml("enable", { xmlns: "urn:xmpp:carbons:2" })
+      );
+      await xmpp.send(enableCarbons);
+      log?.debug?.(`[${accountId}] XEP-0280 Message Carbons enabled`);
+    } catch (err) {
+      log?.warn?.(`[${accountId}] Failed to enable carbons: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    
     // Send initial presence
     const initialPresence = xml("presence", {}, 
       xml("status", {}, "OpenClaw Bot Online"),
@@ -199,11 +230,27 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       lastError: null,
     });
 
+    // Initialize OMEMO if enabled
+    if (config.omemo?.enabled) {
+      try {
+        await initializeOmemo(accountId, config.jid, config.omemo.deviceLabel, log);
+      } catch (err) {
+        log?.error?.(`[${accountId}] OMEMO initialization failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Continue without OMEMO - non-fatal
+      }
+    }
+
+    // Debug: log config for troubleshooting
+    log?.debug?.(`[${accountId}] Config debug: allowFrom=${JSON.stringify(config.allowFrom)} mucs=${JSON.stringify(config.mucs)} dmPolicy=${config.dmPolicy} dms=${JSON.stringify(config.dms)}`);
+
     // Join MUC rooms from config
     if (config.mucs && config.mucs.length > 0) {
+      log?.info?.(`[${accountId}] Joining ${config.mucs.length} MUC rooms...`);
       for (const muc of config.mucs) {
         await joinMuc(xmpp, muc, mucNick, log, accountId, true);
       }
+    } else {
+      log?.debug?.(`[${accountId}] No MUC rooms configured`);
     }
     
     // Join persisted rooms (from previous invites)
@@ -261,6 +308,12 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       log?.info?.(`[${accountId}] Stopping XMPP connection...`);
       
       stopKeepalive(accountId);
+      
+      // Shutdown OMEMO
+      shutdownOmemo(accountId, log).catch((err) => {
+        log?.warn?.(`[${accountId}] OMEMO shutdown error: ${err}`);
+      });
+      
       xmpp.stop();
       activeClients.delete(accountId);
       
@@ -320,37 +373,66 @@ function setupMessageHandler(
       return;
     }
 
-    const body = stanza.getChildText("body");
-    log?.debug?.(`[${accountId}] XMPP message stanza: body=${body ? `"${body.slice(0, 50)}"` : "null"}`);
-    
-    if (!body) return;
+    // Early check for MUC self-messages (before OMEMO decryption to avoid pointless decrypt attempts)
+    const from = stanza.attrs.from;
+    const type = stanza.attrs.type || "chat";
+    const isGroupchat = type === "groupchat";
+    if (isGroupchat) {
+      const senderNickFromFrom = from.split("/")[1];
+      if (senderNickFromFrom === mucNick) {
+        log?.debug?.(`[${accountId}] XMPP skipping self-message in MUC (nick=${senderNickFromFrom})`);
+        return;
+      }
+    }
 
-    // Skip history messages
+    // Early check for history messages (before OMEMO decryption to avoid pointless decrypt attempts on old messages)
     const delay = stanza.getChild("delay", "urn:xmpp:delay") || stanza.getChild("x", "jabber:x:delay");
     if (delay) {
       log?.debug?.(`[${accountId}] XMPP skipping history message (has delay element)`);
       return;
     }
 
-    const from = stanza.attrs.from;
+    // Check for OMEMO encrypted message
+    let body: string | null = null;
+    let wasEncrypted = false;
+    
+    if (isOmemoEnabled(accountId) && isOmemoEncrypted(stanza as Element)) {
+      log?.debug?.(`[${accountId}] OMEMO encrypted message detected`);
+      try {
+        body = await decryptOmemoMessage(accountId, stanza as Element, log);
+        if (body) {
+          wasEncrypted = true;
+          log?.debug?.(`[${accountId}] OMEMO decryption successful`);
+        } else {
+          log?.debug?.(`[${accountId}] OMEMO decryption returned null (message not for us or key transport)`);
+        }
+      } catch (err) {
+        log?.warn?.(`[${accountId}] OMEMO decryption error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    
+    // Fallback to plain body if not encrypted or decryption failed
+    if (!body) {
+      body = stanza.getChildText("body");
+    }
+    
+    log?.debug?.(`[${accountId}] XMPP message stanza: body=${body ? `"${body.slice(0, 50)}"` : "null"} encrypted=${wasEncrypted}`);
+    
+    if (!body) return;
+
+    // History check already done earlier (before OMEMO decryption)
+
     const to = stanza.attrs.to;
-    const type = stanza.attrs.type || "chat";
     const id = stanza.attrs.id || `msg_${Date.now()}`;
 
-    const isGroup = type === "groupchat";
     let senderJid = from;
     let roomJid: string | undefined;
     let senderNick: string | undefined;
 
-    if (isGroup) {
+    if (isGroupchat) {
       roomJid = bareJid(from);
       senderNick = from.split("/")[1];
-      
-      // Skip self-messages in MUC
-      if (senderNick === mucNick) {
-        log?.debug?.(`[${accountId}] XMPP skipping self-message in MUC (nick=${senderNick})`);
-        return;
-      }
+      // Self-message check already done earlier (before OMEMO decryption)
     }
 
     log?.info?.(`[${accountId}] XMPP inbound message: from=${from} type=${type}`);
@@ -388,11 +470,15 @@ function setupMessageHandler(
       body,
       type: type as XmppInboundMessage["type"],
       timestamp: Date.now(),
-      isGroup,
+      isGroup: isGroupchat,
       roomJid,
       senderNick,
       replyToId,
       replyToBody,
+      wasEncrypted,
+      // For MUC, we need the actual sender JID for OMEMO encryption
+      // This is extracted from the stanza's 'from' attribute before we modified senderJid
+      senderJidForOmemo: bareJid(from),
     };
 
     await handleInboundMessage(message, cfg, accountId, config, log, setStatus);

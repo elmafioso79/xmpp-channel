@@ -12,6 +12,7 @@ import { bareJid } from "./config-schema.js";
 import type { Logger } from "./types.js";
 import { goneRooms, pendingMucJoins } from "./state.js";
 import { removePersistedRoom, handleMucInvite } from "./rooms.js";
+import { handleMucPresence } from "./omemo/muc-occupants.js";
 
 /**
  * Setup presence stanza handlers on the XMPP client
@@ -30,6 +31,10 @@ export function setupPresenceHandlers(
     if (!from) return;
     
     const fromBare = bareJid(from);
+    
+    // Track MUC occupants for OMEMO encryption
+    // This must be called early to track all occupant changes
+    handleMucPresence(stanza as Element, accountId, log);
     
     // Check for MUC self-presence (status code 110) - indicates we've joined
     // <presence from="room@conf/mynick"><x xmlns="...muc#user"><status code="110"/></x></presence>

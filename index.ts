@@ -60,3 +60,27 @@ export type { UploadSlot, UploadResult, HttpUploadConfig } from "./src/http-uplo
 
 // Monitor exports
 export { getActiveClient, registerPepEventHandler, unregisterPepEventHandler } from "./src/monitor.js";
+
+// OMEMO exports (XEP-0384)
+export {
+  initializeOmemo,
+  shutdownOmemo,
+  isOmemoEnabled,
+  encryptOmemoMessage,
+  encryptMucOmemoMessage,
+  decryptOmemoMessage,
+  getOmemoStore,
+  getCachedDeviceList,
+  getDeviceCacheStats,
+  refreshDeviceList,
+  prefetchDeviceLists,
+  // MUC OMEMO
+  handleMucPresence,
+  isRoomOmemoCapable,
+  getRoomOccupantJids,
+  getRoomAnonymity,
+  getOccupantStats,
+  NS_OMEMO,
+  NS_OMEMO_DEVICES,
+} from "./src/omemo/index.js";
+export type { OmemoBundle, OmemoDevice, OmemoEncryptedMessage, MucOccupant, RoomAnonymity } from "./src/omemo/index.js";

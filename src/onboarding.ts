@@ -116,18 +116,19 @@ async function promptXmppAllowFrom(
   prompter: WizardPrompter,
   options?: { forceAllowlist?: boolean }
 ): Promise<OpenClawConfig> {
-  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.allowFrom as string[] | undefined;
-  const existingLabel = existing?.length ? existing.join(", ") : "unset (allow all)";
+  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.dms as string[] | undefined;
+  const existingLabel = existing?.length ? existing.join(", ") : "unset (no DM allowlist)";
 
   if (!options?.forceAllowlist) {
     await prompter.note(
       [
-        "XMPP direct chats are gated by `channels.xmpp.dmPolicy` + `channels.xmpp.allowFrom`.",
+        "XMPP direct chats are gated by `channels.xmpp.dmPolicy` + `channels.xmpp.dms`.",
+        "- disabled: block all incoming DMs entirely",
         "- open (default): allow all incoming messages",
         "- pairing: unknown senders get a pairing code; owner approves",
-        "- allowlist: only allow specific JIDs",
+        "- allowlist: only allow specific JIDs from dms",
         "",
-        `Current allowFrom: ${existingLabel}`,
+        `Current dms: ${existingLabel}`,
         `Docs: ${formatDocsLink("/xmpp", "xmpp")}`,
       ].join("\n"),
       "XMPP DM access"
@@ -137,6 +138,7 @@ async function promptXmppAllowFrom(
   const policy = await prompter.select({
     message: "XMPP DM policy",
     options: [
+      { value: "disabled", label: "Disabled (block all DMs)" },
       { value: "open", label: "Open (allow all)" },
       { value: "pairing", label: "Pairing (require approval)" },
       { value: "allowlist", label: "Allowlist only" },
@@ -146,23 +148,23 @@ async function promptXmppAllowFrom(
   let next = mergeXmppConfig(cfg, { dmPolicy: policy });
 
   if (policy === "allowlist") {
-    const allowFromRaw = await prompter.text({
-      message: "Allowed JIDs (comma-separated)",
+    const dmsRaw = await prompter.text({
+      message: "Allowed JIDs for DMs (comma-separated)",
       placeholder: "user1@example.com, user2@example.com",
       initialValue: existing?.join(", "),
     });
 
-    const allowFrom = allowFromRaw
+    const dms = dmsRaw
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
       .map((jid) => bareJid(jid));
 
-    next = mergeXmppConfig(next, { allowFrom });
+    next = mergeXmppConfig(next, { dms });
   } else if (policy === "open") {
-    next = mergeXmppConfig(next, { allowFrom: ["*"] });
+    next = mergeXmppConfig(next, { dms: ["*"] });
   } else {
-    next = mergeXmppConfig(next, {}, { unsetOnUndefined: ["allowFrom"] });
+    next = mergeXmppConfig(next, {}, { unsetOnUndefined: ["dms"] });
   }
 
   return next;

@@ -36,14 +36,21 @@ export const XmppGroupConfigSchema = z.object({
 });
 
 /**
+ * OMEMO encryption configuration schema
+ */
+export const XmppOmemoConfigSchema = z.object({
+  /** Enable OMEMO encryption support */
+  enabled: z.boolean().optional().default(false).describe("Enable OMEMO encryption (XEP-0384)"),
+  /** Device label for this bot instance */
+  deviceLabel: z.string().optional().describe("Display label for this device in OMEMO device list"),
+});
+
+/**
  * XMPP account configuration schema
  */
 export const XmppAccountSchema = z.object({
   /** Account name (optional display name) */
   name: z.string().optional().describe("Display name for this account"),
-
-  /** Whether this account is enabled */
-  enabled: z.boolean().optional().default(true).describe("Enable or disable this account"),
 
   /** Allow the agent to write to config (e.g., add users to allowlist) */
   configWrites: z.boolean().optional().describe("Allow agent to modify config (default: true)"),
@@ -67,25 +74,22 @@ export const XmppAccountSchema = z.object({
   mucNick: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
 
   /** Direct message policy */
-  dmPolicy: z.enum(["open", "pairing", "allowlist", "disabled"]).optional().default("open").describe("Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom), disabled (block all DMs)"),
+  dmPolicy: z.enum(["disabled", "open", "pairing", "allowlist"]).optional().default("open").describe("Direct message policy: disabled (block all DMs), open (allow all), pairing (require pairing), allowlist (only dms)"),
+
+  /** Allowed sender JIDs for DMs (separate from allowFrom) */
+  dms: z.array(z.string()).optional().describe("Allowed sender JIDs for DMs when dmPolicy is allowlist (use * for all)"),
 
   /** Group message policy */
-  groupPolicy: z.enum(["open", "allowlist", "disabled"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist), disabled (block all groups)"),
+  groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
 
-  /** Allowed sender JIDs (for DMs) */
-  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for DMs (use * for all)"),
+  /** Allowed sender JIDs (for pairing/groups) */
+  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for pairing/groups (use * for all)"),
 
   /** Allowed sender JIDs for groups */
   groupAllowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for groups (defaults to allowFrom, use * for all)"),
 
   /** MUC rooms to join */
   mucs: z.array(z.string()).optional().describe("MUC rooms to join on startup"),
-
-  /** XEP-0363 HTTP File Upload endpoint (deprecated) */
-  fileUploadUrl: z.string().url().optional().describe("HTTP File Upload URL (deprecated, use fileUploadService)"),
-
-  /** XEP-0363 HTTP File Upload service JID (auto-discovered if not set) */
-  fileUploadService: z.string().optional().describe("HTTP File Upload service JID (auto-discovered if not set)"),
 
   /** Action configuration */
   actions: XmppActionSchema.optional().describe("Action configuration (reactions, sendMessage)"),
@@ -98,6 +102,9 @@ export const XmppAccountSchema = z.object({
 
   /** Per-group configuration (keyed by room JID or "*" for default) */
   groups: z.record(z.string(), XmppGroupConfigSchema).optional().describe("Per-group configuration for tool policies and mentions"),
+
+  /** OMEMO encryption configuration */
+  omemo: XmppOmemoConfigSchema.optional().describe("OMEMO encryption settings (XEP-0384)"),
 });
 
 /**

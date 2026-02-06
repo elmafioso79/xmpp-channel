@@ -217,11 +217,11 @@ export async function sendXmppMedia(
 
     log?.debug?.(`[XMPP] Looking for upload service on ${serverDomain}`);
 
-    // Try to use HTTP Upload if available
+    // Try to use HTTP Upload if available (auto-discovered)
     const uploadService = await getUploadService(
       accountId,
       serverDomain,
-      config.fileUploadService,
+      undefined, // Auto-discover upload service
       log
     );
 

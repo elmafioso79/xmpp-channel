@@ -2,6 +2,8 @@
 
 XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other XMPP servers.
 
+> **Note:** This plugin has been tested with [Conversations](https://conversations.im/) (Android) and [Gajim](https://gajim.org/) (Desktop). Other XMPP clients may work but have not been verified.
+
 ## Features
 
 - **Direct Messages** — One-on-one chat via XMPP
@@ -70,11 +72,11 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 | `resource` | string | `openclaw` | XMPP resource identifier |
 | `name` | string | - | Account display name |
 | `enabled` | boolean | `true` | Whether account is enabled |
-| `dmPolicy` | string | `open` | DM policy: `open`, `pairing`, `allowlist` |
+| `dmPolicy` | string | `open` | DM policy: `disabled`, `open`, `pairing`, `allowlist` |
+| `dms` | string[] | `[]` | Allowed sender JIDs for DMs (when `dmPolicy` is `allowlist`) |
 | `groupPolicy` | string | `open` | Group policy: `open`, `allowlist` |
-| `allowFrom` | string[] | `[]` | Allowed sender JIDs |
+| `allowFrom` | string[] | `[]` | Allowed sender JIDs (for pairing/groups) |
 | `mucs` | string[] | `[]` | MUC rooms to auto-join |
-| `fileUploadService` | string | auto | XEP-0363 HTTP File Upload service JID (auto-discovered) |
 | `mucNick` | string | JID local | Nickname to use in MUC rooms |
 | `groupAllowFrom` | string[] | `allowFrom` | Allowed senders in groups (falls back to `allowFrom`) |
 | `actions.reactions` | boolean | `false` | Enable XEP-0444 reactions |
@@ -82,6 +84,8 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 | `heartbeatVisibility` | string | - | Heartbeat visibility: `visible`, `hidden` |
 | `groups.<roomJid>.requireMention` | boolean | `false` | Only respond when mentioned in this room |
 | `groups.<roomJid>.tools` | object | - | Tool policy for this room (allow/deny lists) |
+| `omemo.enabled` | boolean | `false` | Enable OMEMO encryption (XEP-0384) |
+| `omemo.deviceLabel` | string | - | Display label for this device in OMEMO device list |
 
 ### Multi-Account Configuration
 
@@ -108,9 +112,10 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 
 ## DM Policies
 
+- **disabled** — Block all incoming DMs entirely
 - **open** — Accept messages from any sender
 - **pairing** — Unknown senders get a pairing code; approve via `openclaw pairing approve xmpp:<code>`
-- **allowlist** — Only accept messages from JIDs in `allowFrom`
+- **allowlist** — Only accept messages from JIDs in `dms`
 
 ## Actions
 
@@ -131,6 +136,59 @@ Enable reactions in config:
 ```
 
 The agent can then use the `react` action to add/remove reactions to messages.
+
+### OMEMO Encryption (XEP-0384)
+
+Enable end-to-end encryption with OMEMO:
+
+```json
+{
+  "channels": {
+    "xmpp": {
+      "omemo": {
+        "enabled": true,
+        "deviceLabel": "OpenClaw Bot"
+      }
+    }
+  }
+}
+```
+
+When OMEMO is enabled:
+- The bot automatically publishes its device ID and key bundle via PEP
+- Incoming encrypted messages are automatically decrypted
+- Outgoing messages are automatically encrypted for all recipient devices
+- MUC messages are encrypted for all room occupants (requires non-anonymous rooms)
+- The bot uses **always-trust** policy (accepts any identity key without verification)
+- Keys are persisted across restarts via OpenClaw's key-value storage
+
+#### OMEMO Requirements
+
+- **Server:** Must support PEP (XEP-0163). Most modern servers (Prosody, ejabberd) support this.
+- **MUC Rooms:** Must be configured as "non-anonymous" for OMEMO to work. This allows the bot to discover real JIDs of occupants.
+- **Clients:** Use an OMEMO-capable client like Conversations or Gajim.
+
+#### OMEMO Technical Details
+
+- Uses the **legacy OMEMO namespace** (`eu.siacs.conversations.axolotl`) for maximum compatibility with Conversations and Gajim
+- Signal protocol via `@privacyresearch/libsignal-protocol-typescript`
+- AES-128-GCM payload encryption (OMEMO 0.3 format)
+- Supports both prekey (initial) and regular Signal messages
+
+#### OMEMO Troubleshooting
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Messages not encrypting | OMEMO not enabled | Add `"omemo": { "enabled": true }` to config |
+| Can't decrypt in MUC | Room is semi-anonymous | Configure room as "non-anonymous" in server |
+| Client doesn't see bot's device | Device not published | Restart openclaw; check PEP is enabled on server |
+| "No devices found" error | Can't fetch recipient's device list | Ensure recipient has OMEMO enabled; check PEP access |
+| Decryption fails after restart | Keys not persisted | Check OpenClaw data directory is writable |
+| Old messages unreadable | Forward secrecy | Normal - OMEMO can't decrypt messages from before session |
+
+**Clearing OMEMO State:**
+
+If you need to reset OMEMO keys (e.g., after corruption), delete the OMEMO store from OpenClaw's key-value storage and restart. The bot will generate new keys and republish its device.
 
 ## Commands
 
@@ -184,7 +242,16 @@ src/
 ├── directory.ts       # Contact/room directory
 ├── heartbeat.ts       # Heartbeat adapter
 ├── onboarding.ts      # CLI setup wizard
-└── status-issues.ts   # Status issue detection
+├── status-issues.ts   # Status issue detection
+│
+└── omemo/             # OMEMO encryption (XEP-0384)
+    ├── index.ts       # OMEMO encrypt/decrypt entry points
+    ├── bundle.ts      # Key bundle generation and publishing
+    ├── device.ts      # Device list management
+    ├── device-cache.ts# Device list caching with TTL
+    ├── muc-occupants.ts # MUC occupant tracking for real JIDs
+    ├── store.ts       # Signal protocol store implementation
+    └── types.ts       # OMEMO type definitions
 ```
 
 ## Roadmap
@@ -195,7 +262,8 @@ src/
 - [x] Phase 3: XEP-0163 PEP, XEP-0363 HTTP file upload
 - [x] Phase 4: XEP-0085 typing, XEP-0333 receipts, XEP-0198 stream management, XEP-0199 keepalive, XEP-0461 replies
 - [x] Code Quality: Modular architecture, split monitor.ts into focused modules
-- [ ] Phase 5: OMEMO encryption (XEP-0384)
+- [x] Phase 5: OMEMO encryption (XEP-0384) with Signal protocol
+- [ ] Phase 6: Message carbons (XEP-0280), message archive (XEP-0313)
 
 ## XEP Support
 
@@ -206,11 +274,24 @@ src/
 | XEP-0163 | Personal Eventing Protocol (PEP) | ✅ Implemented |
 | XEP-0198 | Stream Management | ✅ Implemented (ack, resume) |
 | XEP-0199 | XMPP Ping | ✅ Implemented (30s keepalive) |
+| XEP-0280 | Message Carbons | ⏳ Planned |
+| XEP-0313 | Message Archive Management | ⏳ Planned |
 | XEP-0333 | Chat Markers | ✅ Implemented (read receipts) |
 | XEP-0363 | HTTP File Upload | ✅ Implemented (auto-discovery) |
-| XEP-0384 | OMEMO Encryption | 🔜 Planned |
+| XEP-0384 | OMEMO Encryption | ✅ Implemented (legacy 0.3, always-trust) |
 | XEP-0444 | Message Reactions | ✅ Implemented |
 | XEP-0461 | Message Replies | ✅ Implemented (with fallback) |
+
+## Tested Clients
+
+This plugin has been tested with the following XMPP clients:
+
+| Client | Platform | OMEMO | Notes |
+|--------|----------|-------|-------|
+| [Conversations](https://conversations.im/) | Android | ✅ | Recommended for mobile |
+| [Gajim](https://gajim.org/) | Desktop (Win/Linux/Mac) | ✅ | Recommended for desktop |
+
+Other OMEMO-capable clients may work but have not been verified.
 
 ## License
 

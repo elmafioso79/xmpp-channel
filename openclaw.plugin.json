@@ -2,7 +2,7 @@
   "id": "xmpp",
   "name": "XMPP Channel",
   "description": "XMPP/Jabber channel plugin for Prosody, ejabberd, and other XMPP servers",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "channels": ["xmpp"],
   "configSchema": {
     "type": "object",
@@ -38,11 +38,6 @@
         "type": "string",
         "description": "Account display name"
       },
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this account is enabled"
-      },
       "configWrites": {
         "type": "boolean",
         "default": true,
@@ -50,20 +45,25 @@
       },
       "dmPolicy": {
         "type": "string",
-        "enum": ["open", "pairing", "allowlist", "disabled"],
+        "enum": ["disabled", "open", "pairing", "allowlist"],
         "default": "open",
-        "description": "Direct message policy: open (allow all), pairing (require pairing), allowlist (only allowFrom), disabled (block all DMs)"
+        "description": "Direct message policy"
+      },
+      "dms": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowed sender JIDs for DMs when dmPolicy is allowlist (use * for all)"
       },
       "groupPolicy": {
         "type": "string",
-        "enum": ["open", "allowlist", "disabled"],
+        "enum": ["open", "allowlist"],
         "default": "open",
-        "description": "Group message policy: open (respond to all), allowlist (require mention or allowlist), disabled (block all groups)"
+        "description": "Group message policy"
       },
       "allowFrom": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "Allowed sender JIDs for DMs (use * for all)"
+        "description": "Allowed sender JIDs for pairing/groups (use * for all)"
       },
       "groupAllowFrom": {
         "type": "array",
@@ -74,10 +74,6 @@
         "type": "array",
         "items": { "type": "string" },
         "description": "MUC rooms to auto-join"
-      },
-      "fileUploadService": {
-        "type": "string",
-        "description": "XEP-0363 HTTP File Upload service JID (auto-discovered)"
       },
       "actions": {
         "type": "object",
@@ -118,12 +114,12 @@
             "name": { "type": "string", "description": "Account display name" },
             "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
             "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
-            "dmPolicy": { "type": "string", "enum": ["open", "pairing", "allowlist", "disabled"], "description": "DM policy" },
-            "groupPolicy": { "type": "string", "enum": ["open", "allowlist", "disabled"], "description": "Group policy" },
-            "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed DM senders" },
+            "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "DM policy" },
+            "dms": { "type": "array", "items": { "type": "string" }, "description": "Allowed DM senders" },
+            "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
+            "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed senders for pairing/groups" },
             "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
             "mucs": { "type": "array", "items": { "type": "string" }, "description": "MUC rooms to join" },
-            "fileUploadService": { "type": "string", "description": "XEP-0363 upload service JID" },
             "actions": { "type": "object", "description": "Action configuration" },
             "messagePrefix": { "type": "string", "description": "Inbound message prefix" },
             "heartbeatVisibility": { "type": "string", "enum": ["visible", "hidden"], "description": "Heartbeat visibility" },

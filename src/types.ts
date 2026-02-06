@@ -3,12 +3,12 @@ import type { OpenClawConfig, RuntimeEnv, WizardPrompter } from "openclaw/plugin
 /**
  * DM Policy type
  */
-export type DmPolicy = "open" | "pairing" | "allowlist" | "disabled";
+export type DmPolicy = "disabled" | "open" | "pairing" | "allowlist";
 
 /**
  * Group Policy type
  */
-export type GroupPolicy = "open" | "allowlist" | "disabled";
+export type GroupPolicy = "open" | "allowlist";
 
 /**
  * XMPP actions configuration
@@ -45,6 +45,16 @@ export interface XmppGroupConfig {
 }
 
 /**
+ * OMEMO encryption configuration
+ */
+export interface XmppOmemoConfig {
+  /** Enable OMEMO encryption support */
+  enabled?: boolean;
+  /** Device label for this bot instance */
+  deviceLabel?: string;
+}
+
+/**
  * XMPP channel configuration
  */
 export interface XmppConfig {
@@ -70,16 +80,14 @@ export interface XmppConfig {
   dmPolicy?: DmPolicy;
   /** Group message policy */
   groupPolicy?: GroupPolicy;
-  /** Allowed sender JIDs (for DMs) */
+  /** Allowed sender JIDs (for pairing/groups) */
   allowFrom?: string[];
+  /** Allowed sender JIDs for DMs (separate from allowFrom) */
+  dms?: string[];
   /** Allowed sender JIDs for groups (if different from allowFrom) */
   groupAllowFrom?: string[];
   /** MUC rooms to join */
   mucs?: string[];
-  /** XEP-0363 HTTP File Upload endpoint (deprecated, use fileUploadService) */
-  fileUploadUrl?: string;
-  /** XEP-0363 HTTP File Upload service JID (auto-discovered if not set) */
-  fileUploadService?: string;
   /** Action configuration (reactions, etc.) */
   actions?: XmppActionConfig;
   /** Inbound message prefix */
@@ -88,6 +96,8 @@ export interface XmppConfig {
   heartbeatVisibility?: "visible" | "hidden";
   /** Per-group configuration (keyed by room JID or "*" for default) */
   groups?: Record<string, XmppGroupConfig>;
+  /** OMEMO encryption configuration */
+  omemo?: XmppOmemoConfig;
   /** Multi-account configuration */
   accounts?: Record<string, XmppConfig>;
 }
@@ -111,6 +121,7 @@ export interface XmppAccountDescriptor {
   configured: boolean;
   dmPolicy?: DmPolicy;
   allowFrom?: string[];
+  dms?: string[];
 }
 
 /**
@@ -130,6 +141,10 @@ export interface XmppInboundMessage {
   replyToId?: string;
   /** XEP-0461: Body of message being replied to (from fallback) */
   replyToBody?: string;
+  /** True if the incoming message was OMEMO encrypted */
+  wasEncrypted?: boolean;
+  /** Sender JID for OMEMO encryption (bare JID, needed for MUC) */
+  senderJidForOmemo?: string;
 }
 
 /**

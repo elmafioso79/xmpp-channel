@@ -174,10 +174,14 @@ export const xmppPlugin = {
       configured: Boolean(account.config?.jid),
       dmPolicy: account.config?.dmPolicy,
       allowFrom: account.config?.allowFrom,
+      dms: account.config?.dms,
     }),
     
     resolveAllowFrom: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
       resolveXmppAccount({ cfg, accountId }).config?.allowFrom ?? [],
+    
+    resolveDms: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
+      resolveXmppAccount({ cfg, accountId }).config?.dms ?? [],
     
     formatAllowFrom: ({ allowFrom }: { allowFrom: Array<string | number> }) =>
       formatAllowFromEntries(allowFrom),
@@ -185,21 +189,14 @@ export const xmppPlugin = {
 
   // Security adapter
   security: {
-    resolveDmPolicy: ({ cfg, accountId, account }: { cfg: OpenClawConfig; accountId?: string | null; account: ResolvedXmppAccount }) => {
-      const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID;
-      const useAccountPath = Boolean((cfg as { channels?: { xmpp?: { accounts?: Record<string, unknown> } } }).channels?.xmpp?.accounts?.[resolvedAccountId]);
-      const basePath = useAccountPath
-        ? `channels.xmpp.accounts.${resolvedAccountId}.`
-        : "channels.xmpp.";
-      return {
-        policy: account.config?.dmPolicy || "open",
-        allowFrom: account.config?.allowFrom || [],
-        policyPath: `${basePath}dmPolicy`,
-        allowFromPath: basePath,
-        approveHint: formatPairingApproveHint("xmpp"),
-        normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
-      };
-    },
+    resolveDmPolicy: ({ account }: { account: ResolvedXmppAccount }) => ({
+      policy: account.config?.dmPolicy || "open",
+      allowFrom: account.config?.dms || [],
+      policyPath: "channels.xmpp.dmPolicy",
+      allowFromPath: "channels.xmpp.dms",
+      approveHint: formatPairingApproveHint("xmpp"),
+      normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
+    }),
   },
 
   // Groups adapter

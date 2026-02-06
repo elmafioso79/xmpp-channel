@@ -5,6 +5,7 @@
  */
 
 import { xml } from "@xmpp/client";
+import { randomUUID } from "crypto";
 import { bareJid } from "./config-schema.js";
 import { getXmppRuntime } from "./runtime.js";
 import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
@@ -12,6 +13,14 @@ import { sendXmppMedia } from "./outbound.js";
 import type { XmppConfig, XmppInboundMessage, Logger, ChannelAccountStatusPatch } from "./types.js";
 import { activeClients } from "./state.js";
 import { sendChatState } from "./chat-state.js";
+import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, isRoomOmemoCapable, buildOmemoMessageStanza } from "./omemo/index.js";
+
+/**
+ * Generate a proper XMPP message ID
+ */
+function generateMessageId(): string {
+  return randomUUID();
+}
 
 /**
  * Handle inbound message - validate allowlist and route to OpenClaw
@@ -35,15 +44,15 @@ export async function handleInboundMessage(
   // Check allowlist - different logic for groups vs DMs
   const senderBare = bareJid(message.from);
   
+  // First check if sender is in allowFrom (owners) - they always have access
+  const allowFromList = normalizeAllowFrom(config.allowFrom);
+  const isOwner = isSenderAllowed(allowFromList, senderBare);
+  
   if (message.isGroup) {
     // For groups: check groupPolicy first
     const groupPolicy = config.groupPolicy ?? "open";
     
-    if (groupPolicy === "disabled") {
-      // Disabled policy - block all group messages
-      log?.debug?.(`[XMPP] Group message blocked (groupPolicy: disabled)`);
-      return;
-    } else if (groupPolicy === "open") {
+    if (groupPolicy === "open") {
       // Open policy - allow all group messages
       log?.debug?.(`[XMPP] Group message allowed (groupPolicy: open)`);
     } else {
@@ -55,32 +64,40 @@ export async function handleInboundMessage(
       }
     }
   } else {
-    // For DMs: check dmPolicy and allowFrom
-    const dmPolicy = config.dmPolicy ?? "open";
-    
-    if (dmPolicy === "disabled") {
-      // Disabled policy - block all DMs
-      log?.debug?.(`[XMPP] DM blocked (dmPolicy: disabled)`);
-      return;
-    } else if (dmPolicy === "open") {
-      log?.debug?.(`[XMPP] DM allowed (dmPolicy: open)`);
+    // For DMs: owners (allowFrom) always have access
+    if (isOwner) {
+      log?.debug?.(`[XMPP] DM allowed (sender ${senderBare} is in allowFrom)`);
     } else {
-      // pairing or allowlist - check allowFrom
-      const allowFrom = normalizeAllowFrom(config.allowFrom);
-      if (!isSenderAllowed(allowFrom, senderBare)) {
-        log?.debug?.(`[XMPP] DM blocked: ${senderBare} not in allowFrom (dmPolicy: ${dmPolicy})`);
+      // Non-owners: check dmPolicy and dms
+      const dmPolicy = config.dmPolicy ?? "open";
+      
+      if (dmPolicy === "disabled") {
+        log?.debug?.(`[XMPP] DM blocked (dmPolicy: disabled)`);
         return;
+      } else if (dmPolicy === "open") {
+        log?.debug?.(`[XMPP] DM allowed (dmPolicy: open)`);
+      } else {
+        // dmPolicy === "allowlist"
+        const dms = normalizeAllowFrom(config.dms);
+        if (!isSenderAllowed(dms, senderBare)) {
+          log?.debug?.(`[XMPP] DM blocked: ${senderBare} not in dms (and not owner)`);
+          return;
+        }
       }
     }
   }
 
-  log?.info?.(`[XMPP] Inbound: from=${senderBare} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);
+  // For groups, sender identity is the full occupant JID (room@conference/nickname)
+  // For DMs, sender identity is the bare JID (user@server)
+  const senderIdentity = message.isGroup ? message.from : senderBare;
+  
+  log?.info?.(`[XMPP] Inbound: from=${senderIdentity} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);  
 
   // Simple command authorization - if sender is allowed, they can use commands
   // Commands are handled by OpenClaw core when CommandAuthorized is true
   const dmPolicy = config.dmPolicy ?? "open";
-  const allowFromList = normalizeAllowFrom(config.allowFrom);
-  const senderAllowedForDm = dmPolicy === "open" || isSenderAllowed(allowFromList, senderBare);
+  const dmsList = normalizeAllowFrom(config.dms);
+  const senderAllowedForDm = dmPolicy === "open" || (dmPolicy !== "disabled" && isSenderAllowed(dmsList, senderBare));
   
   // Authorize commands for any allowed sender
   const commandAuthorized = senderAllowedForDm;
@@ -105,14 +122,14 @@ export async function handleInboundMessage(
     Body: message.body,
     RawBody: message.body,
     CommandBody: message.body,
-    From: `xmpp:${senderBare}`,
+    From: `xmpp:${senderIdentity}`,
     To: `xmpp:${message.to}`,
     SessionKey: route.sessionKey,
     AccountId: accountId,
     ChatType: message.isGroup ? "group" : "direct",
     ConversationLabel: message.isGroup ? message.roomJid : senderBare,
     SenderName: message.senderNick || senderBare.split("@")[0],
-    SenderId: senderBare,
+    SenderId: senderIdentity,
     Provider: "xmpp",
     Surface: "xmpp",
     MessageSid: message.id || `xmpp-${Date.now()}`,
@@ -137,6 +154,8 @@ export async function handleInboundMessage(
     },
   });
 
+  log?.info?.(`[XMPP] Dispatching reply for session ${route.sessionKey}`);
+  
   // Dispatch reply
   await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx,
@@ -144,10 +163,13 @@ export async function handleInboundMessage(
     dispatcherOptions: {
       responsePrefix: "",
       deliver: async (payload: { text?: string; markdown?: string; mediaUrl?: string; mediaUrls?: string[] }) => {
-        await deliverReply(payload, message, config, accountId, senderBare, log, setStatus);
+        log?.info?.(`[XMPP] Deliver callback invoked with: text=${payload.text?.length ?? 0} chars, markdown=${payload.markdown?.length ?? 0} chars`);
+        await deliverReply(payload, message, config, accountId, senderIdentity, log, setStatus);
       },
     },
   });
+  
+  log?.info?.(`[XMPP] Reply dispatch completed`);
 }
 
 /**
@@ -158,21 +180,27 @@ async function deliverReply(
   message: XmppInboundMessage,
   config: XmppConfig,
   accountId: string,
-  senderBare: string,
+  senderIdentity: string,
   log?: Logger,
   setStatus?: (patch: ChannelAccountStatusPatch) => void
 ): Promise<void> {
-  log?.debug?.(`[XMPP] Deliver: text=${!!payload.text} markdown=${!!payload.markdown} media=${!!(payload.mediaUrl || payload.mediaUrls?.length)}`);
+  log?.info?.(`[XMPP] deliverReply called: text=${!!payload.text} markdown=${!!payload.markdown} media=${!!(payload.mediaUrl || payload.mediaUrls?.length)}`);
+  log?.info?.(`[XMPP] deliverReply details: accountId=${accountId} sender=${senderIdentity} isGroup=${message.isGroup} roomJid=${message.roomJid}`);
   
   const xmppClient = activeClients.get(accountId);
   if (!xmppClient) {
-    log?.error?.("[XMPP] No active client for reply");
+    log?.error?.(`[XMPP] No active client for reply (accountId: ${accountId}, available: ${Array.from(activeClients.keys()).join(", ")})`);
     return;
   }
 
-  const replyTo = message.isGroup ? message.roomJid! : senderBare;
+  // For groups: reply to the room
+  // For DMs: reply to the sender's bare JID
+  const replyTo = message.isGroup ? message.roomJid! : bareJid(senderIdentity);
   const msgType = message.isGroup ? "groupchat" : "chat";
   const textToSend = payload.markdown || payload.text;
+  
+  log?.info?.(`[XMPP] Will reply to: ${replyTo} (type: ${msgType})`);
+  log?.info?.(`[XMPP] Reply text: ${textToSend?.slice(0, 100)}...`);
   
   // Send typing indicator (XEP-0085) before response
   await sendChatState(accountId, replyTo, "composing", log);
@@ -224,34 +252,90 @@ async function deliverReply(
   
   log?.info?.(`[XMPP] Reply to ${replyTo}: ${textToSend.slice(0, 50)}...`);
 
-  // Build reply with XEP-0461 reply context (reference original message)
-  const replyChildren: ReturnType<typeof xml>[] = [
-    xml("body", {}, textToSend),
-  ];
+  // Check if we should encrypt the reply
+  // Encrypt if: incoming was encrypted AND OMEMO enabled AND (DM OR OMEMO-capable MUC)
+  const omemoEnabled = isOmemoEnabled(accountId);
+  const shouldEncryptDm = message.wasEncrypted && !message.isGroup && omemoEnabled;
+  const shouldEncryptMuc = message.wasEncrypted && message.isGroup && omemoEnabled && isRoomOmemoCapable(accountId, bareJid(replyTo));
   
-  // Include XEP-0461 reply reference to original message
-  if (message.id) {
+  if (shouldEncryptDm) {
+    // Encrypt with OMEMO for DMs
+    const recipientJid = message.senderJidForOmemo || bareJid(senderIdentity);
+    log?.debug?.(`[XMPP] Encrypting reply with OMEMO for ${recipientJid}`);
+    
+    try {
+      const encryptedElement = await encryptOmemoMessage(accountId, recipientJid, textToSend, log);
+      if (encryptedElement) {
+        const encryptedStanza = buildOmemoMessageStanza(replyTo, encryptedElement, "chat");
+        log?.debug?.(`[XMPP] Sending OMEMO encrypted reply to ${replyTo}`);
+        await xmppClient.send(encryptedStanza);
+        log?.info?.(`[XMPP] Successfully sent OMEMO encrypted reply to ${replyTo}`);
+        
+        // Update lastOutboundAt and clear typing indicator
+        setStatus?.({ accountId, lastOutboundAt: Date.now() });
+        await sendChatState(accountId, replyTo, "active", log);
+        return;
+      } else {
+        log?.warn?.(`[XMPP] OMEMO encryption failed, falling back to plaintext`);
+      }
+    } catch (err) {
+      log?.error?.(`[XMPP] OMEMO encryption error: ${err instanceof Error ? err.message : String(err)}, falling back to plaintext`);
+    }
+  } else if (shouldEncryptMuc) {
+    // Encrypt with OMEMO for MUC rooms
+    const roomJid = bareJid(replyTo);
+    log?.debug?.(`[XMPP] Encrypting MUC reply with OMEMO for room ${roomJid}`);
+    
+    try {
+      const encryptedElement = await encryptMucOmemoMessage(accountId, roomJid, textToSend, log);
+      if (encryptedElement) {
+        const encryptedStanza = buildOmemoMessageStanza(replyTo, encryptedElement, "groupchat");
+        log?.debug?.(`[XMPP] Sending MUC OMEMO encrypted reply to ${replyTo}`);
+        await xmppClient.send(encryptedStanza);
+        log?.info?.(`[XMPP] Successfully sent MUC OMEMO encrypted reply to ${replyTo}`);
+        
+        // Update lastOutboundAt and clear typing indicator
+        setStatus?.({ accountId, lastOutboundAt: Date.now() });
+        await sendChatState(accountId, replyTo, "active", log);
+        return;
+      } else {
+        log?.warn?.(`[XMPP] MUC OMEMO encryption failed, falling back to plaintext`);
+      }
+    } catch (err) {
+      log?.error?.(`[XMPP] MUC OMEMO encryption error: ${err instanceof Error ? err.message : String(err)}, falling back to plaintext`);
+    }
+  }
+
+  // Build reply message with XEP-0461 (Message Replies) for proper threading
+  const messageId = generateMessageId();
+  const originalMsgId = message.id;
+  // XEP-0461: for groups, use full occupant JID (room/nick); for DMs, use bare JID
+  const originalSender = senderIdentity;
+  
+  // XEP-0461: reply element references the original message
+  const replyChildren: ReturnType<typeof xml>[] = [xml("body", {}, textToSend)];
+  
+  // Add XEP-0461 reply reference if we have the original message ID
+  if (originalMsgId) {
     replyChildren.push(
-      xml("reply", { 
-        xmlns: "urn:xmpp:reply:0", 
-        to: message.from,
-        id: message.id,
-      })
-    );
-    // Add fallback for clients that don't support XEP-0461
-    replyChildren.push(
-      xml("fallback", { xmlns: "urn:xmpp:fallback:0", for: "urn:xmpp:reply:0" })
+      xml("reply", { xmlns: "urn:xmpp:reply:0", to: originalSender, id: originalMsgId })
     );
   }
   
   const reply = xml(
     "message",
-    { to: replyTo, type: msgType, id: `reply-${Date.now()}` },
+    { to: replyTo, type: msgType, id: messageId },
     ...replyChildren
   );
 
-  await xmppClient.send(reply);
-  log?.debug?.(`[XMPP] Sent to ${replyTo}`);
+  log?.debug?.(`[XMPP] Sending stanza: to=${replyTo} type=${msgType} id=${messageId} replyTo=${originalMsgId || "none"}`);
+
+  try {
+    await xmppClient.send(reply);
+    log?.info?.(`[XMPP] Successfully sent reply to ${replyTo}: ${textToSend.slice(0, 100)}...`);
+  } catch (err) {
+    log?.error?.(`[XMPP] Failed to send reply: ${err instanceof Error ? err.message : String(err)}`);
+  }
   
   // Update lastOutboundAt and clear typing indicator
   setStatus?.({ accountId, lastOutboundAt: Date.now() });

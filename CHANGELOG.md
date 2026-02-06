@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-06
+
+### Added
+
+- **OMEMO Encryption (XEP-0384)**
+  - End-to-end encryption using the Signal protocol
+  - Uses legacy namespace `eu.siacs.conversations.axolotl` for Conversations/Gajim compatibility
+  - Automatic device ID and key bundle publication via PEP
+  - Automatic decryption of incoming OMEMO messages
+  - Automatic encryption of outgoing messages when OMEMO is enabled
+  - MUC group encryption with per-occupant key distribution
+  - Always-trust policy (accepts any identity key without verification)
+  - Persistent key storage across restarts via OpenClaw's key-value storage
+  - Device list caching with PEP subscription for updates
+  - MUC occupant tracking for real JID discovery (non-anonymous rooms)
+  - Self-encryption support for multi-device scenarios
+  - Configurable device label for OMEMO device list
+
+### Fixed
+
+- Skip MUC self-echo messages before OMEMO decryption (prevents "decrypt on sending chain" errors)
+- Skip MUC history messages before OMEMO decryption (forward secrecy prevents decryption of old messages)
+
+### Technical Details
+
+- Uses `@privacyresearch/libsignal-protocol-typescript` for Signal protocol
+- AES-128-GCM for payload encryption (legacy OMEMO 0.3 format)
+- Supports both prekey and regular Signal messages
+
 ## [0.2.0] - 2026-02-04
 
 ### Added
@@ -116,6 +145,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- XEP-0384: OMEMO Encryption support
 - Message carbons (XEP-0280)
 - Message archive management (XEP-0313)
