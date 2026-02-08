@@ -14,6 +14,7 @@ import { xml } from "@xmpp/client";
 import type { Element } from "@xmpp/client";
 import { getActiveClient } from "./monitor.js";
 import type { Logger } from "./types.js";
+import { iqId, extractErrorText, waitForIq } from "./xml-utils.js";
 import * as https from "https";
 import * as http from "http";
 import { URL } from "url";
@@ -48,59 +49,7 @@ export interface HttpUploadConfig {
   maxFileSize?: number;
 }
 
-/**
- * Create a unique IQ ID
- */
-function iqId(): string {
-  return `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/**
- * Extract error text from an error element
- */
-function extractErrorText(error: Element | undefined): string {
-  if (!error) return "Unknown error";
-  const text = error.getChildText("text");
-  if (text) return text;
-  // Try to get first child element's name as error type
-  const children = error.children || [];
-  for (const child of children) {
-    if (typeof child !== "string" && (child as Element).name) {
-      return (child as Element).name;
-    }
-  }
-  return "Unknown error";
-}
-
-/**
- * Wait for IQ response matching the request ID
- */
-function waitForIq(
-  client: ReturnType<typeof import("@xmpp/client").client>,
-  requestId: string,
-  timeoutMs: number = 30000
-): Promise<Element> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("IQ request timed out"));
-    }, timeoutMs);
-
-    const handler = (stanza: Element) => {
-      if (stanza.is("iq") && stanza.attrs.id === requestId) {
-        cleanup();
-        resolve(stanza);
-      }
-    };
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      client.off("stanza", handler);
-    };
-
-    client.on("stanza", handler);
-  });
-}
+// iqId, extractErrorText, waitForIq imported from xml-utils.ts
 
 /**
  * Discover HTTP Upload service via disco

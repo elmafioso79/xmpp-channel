@@ -44,17 +44,35 @@ xmpp-channel/
 │   ├── config-schema.ts   # Zod schema for config validation
 │   ├── monitor.ts         # XMPP connection lifecycle
 │   ├── outbound.ts        # Send messages to XMPP
+│   ├── inbound.ts         # Inbound message routing
 │   ├── onboarding.ts      # CLI setup wizard
 │   ├── actions.ts         # Message actions (reactions)
 │   ├── directory.ts       # Contact/room directory
 │   ├── heartbeat.ts       # Heartbeat adapter
+│   ├── state.ts           # Global state maps and constants
+│   ├── rooms.ts           # MUC room management
+│   ├── keepalive.ts       # XEP-0199 ping keepalive
+│   ├── reconnect.ts       # Exponential backoff reconnection
+│   ├── chat-state.ts      # XEP-0085 typing, XEP-0333 receipts
+│   ├── stanza-handlers.ts # Presence and invite handlers
+│   ├── iq-handlers.ts     # XEP-0092 version, XEP-0202 time
 │   ├── pep.ts             # XEP-0163 Personal Eventing
 │   ├── http-upload.ts     # XEP-0363 HTTP File Upload
+│   ├── xml-utils.ts       # Shared XML/stanza utilities
 │   ├── normalize.ts       # JID normalization
 │   ├── status-issues.ts   # Status issue detection
 │   ├── types.ts           # TypeScript interfaces
-│   └── runtime.ts         # Runtime getter/setter
-├── index.ts               # Re-exports from src/index.ts
+│   ├── runtime.ts         # Runtime getter/setter
+│   ├── declarations.d.ts  # Type declarations for SDK
+│   └── omemo/             # OMEMO encryption (XEP-0384)
+│       ├── index.ts       # Encrypt/decrypt entry points
+│       ├── bundle.ts      # Key bundle management
+│       ├── device.ts      # Device list management
+│       ├── device-cache.ts# Device list caching
+│       ├── muc-occupants.ts # MUC occupant tracking
+│       ├── store.ts       # Signal protocol store
+│       └── types.ts       # OMEMO type definitions
+├── index.ts               # Re-exports from src/
 ├── openclaw.plugin.json   # OpenClaw plugin manifest
 ├── package.json
 └── tsconfig.json

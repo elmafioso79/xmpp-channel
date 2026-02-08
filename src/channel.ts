@@ -174,14 +174,10 @@ export const xmppPlugin = {
       configured: Boolean(account.config?.jid),
       dmPolicy: account.config?.dmPolicy,
       allowFrom: account.config?.allowFrom,
-      dms: account.config?.dms,
     }),
     
     resolveAllowFrom: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
       resolveXmppAccount({ cfg, accountId }).config?.allowFrom ?? [],
-    
-    resolveDms: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
-      resolveXmppAccount({ cfg, accountId }).config?.dms ?? [],
     
     formatAllowFrom: ({ allowFrom }: { allowFrom: Array<string | number> }) =>
       formatAllowFromEntries(allowFrom),
@@ -191,9 +187,9 @@ export const xmppPlugin = {
   security: {
     resolveDmPolicy: ({ account }: { account: ResolvedXmppAccount }) => ({
       policy: account.config?.dmPolicy || "open",
-      allowFrom: account.config?.dms || [],
+      allowFrom: account.config?.allowFrom || [],
       policyPath: "channels.xmpp.dmPolicy",
-      allowFromPath: "channels.xmpp.dms",
+      allowFromPath: "channels.xmpp.allowFrom",
       approveHint: formatPairingApproveHint("xmpp"),
       normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
     }),
@@ -204,7 +200,7 @@ export const xmppPlugin = {
     resolveRequireMention: ({ cfg }: { cfg: OpenClawConfig }): boolean =>
       getConfig(cfg).groupPolicy !== "open",
     resolveGroupIntroHint: (): string | undefined =>
-      "XMPP group chat. Mention the bot or use DM for commands.",
+      "XMPP group chat. Mention the bot or use a direct chat for commands.",
     resolveToolPolicy: (params: {
       cfg: OpenClawConfig;
       groupId?: string | null;

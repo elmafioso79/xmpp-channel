@@ -10,25 +10,10 @@
 type SignalLib = any;
 
 import type { Logger } from "../types.js";
+import { toBase64, fromBase64 } from "../xml-utils.js";
 import type { KeyPair, SignedPreKey, OmemoStoreData } from "./types.js";
 
-// =============================================================================
-// UTILITY FUNCTIONS
-// =============================================================================
-
-/**
- * Convert Uint8Array to base64 string
- */
-function toBase64(data: Uint8Array): string {
-  return Buffer.from(data).toString("base64");
-}
-
-/**
- * Convert base64 string to Uint8Array
- */
-function fromBase64(data: string): Uint8Array {
-  return new Uint8Array(Buffer.from(data, "base64"));
-}
+// toBase64, fromBase64 imported from xml-utils.ts
 
 /**
  * Convert Uint8Array to ArrayBuffer (proper type conversion)

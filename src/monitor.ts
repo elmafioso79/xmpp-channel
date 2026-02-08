@@ -29,6 +29,7 @@ import {
 } from "./reconnect.js";
 import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { setupPresenceHandlers, setupMucInviteHandler } from "./stanza-handlers.js";
+import { setupIqHandlers } from "./iq-handlers.js";
 import { handleInboundMessage } from "./inbound.js";
 
 // OMEMO imports
@@ -189,6 +190,9 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
   // Setup MUC invite handler
   setupMucInviteHandler(xmpp, accountId, mucNick, log);
 
+  // Setup IQ handlers (XEP-0092 version, XEP-0202 time)
+  setupIqHandlers(xmpp, accountId, log);
+
   // Connection events
   xmpp.on("online", async (address) => {
     log?.info?.(`[${accountId}] XMPP online as ${address.toString()}`);
@@ -241,7 +245,7 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     }
 
     // Debug: log config for troubleshooting
-    log?.debug?.(`[${accountId}] Config debug: allowFrom=${JSON.stringify(config.allowFrom)} mucs=${JSON.stringify(config.mucs)} dmPolicy=${config.dmPolicy} dms=${JSON.stringify(config.dms)}`);
+    log?.debug?.(`[${accountId}] Config debug: allowFrom=${JSON.stringify(config.allowFrom)} mucs=${JSON.stringify(config.mucs)} dmPolicy=${config.dmPolicy}`);
 
     // Join MUC rooms from config
     if (config.mucs && config.mucs.length > 0) {

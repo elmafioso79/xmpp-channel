@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-08
+
+### Changed
+
+- **Unified access model** — Removed separate `dms` config field; `allowFrom` now serves as both bot-owner list and direct chat allowlist
+  - `allowFrom` = bot owners (always have direct chat access)
+  - `dmPolicy` = controls guest access (JIDs not in allowFrom): open, disabled, pairing, allowlist
+- **Improved onboarding** — Wizard now asks for owner JIDs first, then guest policy in a logical order; eliminated duplicate DM policy prompt
+- **Updated terminology** — "DMs" → "direct chats" throughout user-facing messages and docs
+
+### Refactored
+
+- **Shared utilities** — Extracted duplicated `toBase64`, `fromBase64`, `getElementText`, `extractErrorText`, `iqId`, `waitForIq` into shared `xml-utils.ts` module
+- **Dynamic version** — `iq-handlers.ts` now reads plugin version from `package.json` instead of hardcoded constant
+
 ## [0.3.0] - 2026-02-06
 
 ### Added
@@ -145,5 +160,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- Message carbons (XEP-0280)
-- Message archive management (XEP-0313)
+

@@ -11,6 +11,7 @@ import type { Element } from "@xmpp/client";
 import * as fs from "fs";
 import * as path from "path";
 import type { Logger } from "../types.js";
+import { toBase64, fromBase64, getElementText } from "../xml-utils.js";
 import { OmemoStore } from "./store.js";
 import { publishDeviceId, fetchDeviceList } from "./device.js";
 import { publishBundle, fetchBundle, buildBundleFromStore } from "./bundle.js";
@@ -75,35 +76,7 @@ const omemoStores = new Map<string, OmemoStore>();
 const omemoEnabled = new Set<string>();
 
 // =============================================================================
-// UTILITY FUNCTIONS
-// =============================================================================
-
-/**
- * Convert Uint8Array to base64 string
- */
-function toBase64(data: Uint8Array): string {
-  return Buffer.from(data).toString("base64");
-}
-
-/**
- * Convert base64 string to Uint8Array
- */
-function fromBase64(data: string): Uint8Array {
-  return new Uint8Array(Buffer.from(data, "base64"));
-}
-
-/**
- * Get text content from an Element (handles xmpp.js Element structure)
- */
-function getElementText(el: Element): string {
-  if (!el || !el.children) return "";
-  for (const child of el.children) {
-    if (typeof child === "string") {
-      return child;
-    }
-  }
-  return "";
-}
+// toBase64, fromBase64, getElementText imported from xml-utils.ts
 
 // =============================================================================
 // FILE-BASED PERSISTENCE

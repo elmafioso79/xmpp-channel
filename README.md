@@ -9,7 +9,8 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 - **Direct Messages** — One-on-one chat via XMPP
 - **Group Chat** — Multi-User Chat (MUC) with auto-join and invite handling
 - **Multi-Account** — Configure multiple XMPP accounts
-- **Allowlist** — Control who can interact with the bot (DM and group policies)
+- **Owner Access** — `allowFrom` defines bot owners who always have direct chat access
+- **Guest Policies** — `dmPolicy` controls guest access: open, disabled, pairing, or allowlist
 - **Pairing** — Approve unknown senders with pairing codes
 - **Reactions** — XEP-0444 message reactions support
 - **Typing Indicators** — XEP-0085 chat state notifications
@@ -72,10 +73,9 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 | `resource` | string | `openclaw` | XMPP resource identifier |
 | `name` | string | - | Account display name |
 | `enabled` | boolean | `true` | Whether account is enabled |
-| `dmPolicy` | string | `open` | DM policy: `disabled`, `open`, `pairing`, `allowlist` |
-| `dms` | string[] | `[]` | Allowed sender JIDs for DMs (when `dmPolicy` is `allowlist`) |
+| `dmPolicy` | string | `open` | Guest direct chat policy: `disabled`, `open`, `pairing`, `allowlist` |
+| `allowFrom` | string[] | `[]` | Bot owner JIDs (always have direct chat access; also the allowlist) |
 | `groupPolicy` | string | `open` | Group policy: `open`, `allowlist` |
-| `allowFrom` | string[] | `[]` | Allowed sender JIDs (for pairing/groups) |
 | `mucs` | string[] | `[]` | MUC rooms to auto-join |
 | `mucNick` | string | JID local | Nickname to use in MUC rooms |
 | `groupAllowFrom` | string[] | `allowFrom` | Allowed senders in groups (falls back to `allowFrom`) |
@@ -110,12 +110,12 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 }
 ```
 
-## DM Policies
+## Direct Chat Policies
 
-- **disabled** — Block all incoming DMs entirely
-- **open** — Accept messages from any sender
-- **pairing** — Unknown senders get a pairing code; approve via `openclaw pairing approve xmpp:<code>`
-- **allowlist** — Only accept messages from JIDs in `dms`
+- **disabled** — Only owner JIDs (in `allowFrom`) can direct-chat the bot
+- **open** — Accept direct chats from any sender
+- **pairing** — Guests get a pairing code; approve via `openclaw pairing approve xmpp:<code>`
+- **allowlist** — Only JIDs in `allowFrom` may direct-chat (same as disabled)
 
 ## Actions
 
@@ -225,6 +225,7 @@ src/
 ├── monitor.ts         # Main XMPP connection entry point
 ├── state.ts           # Global state maps and constants
 ├── stanza-handlers.ts # Presence and invite handlers
+├── iq-handlers.ts     # XEP-0092 version, XEP-0202 time
 ├── inbound.ts         # Inbound message routing to OpenClaw
 ├── outbound.ts        # Send messages to XMPP
 │
@@ -236,6 +237,7 @@ src/
 ├── pep.ts             # XEP-0163 Personal Eventing Protocol
 ├── http-upload.ts     # XEP-0363 HTTP File Upload
 ├── actions.ts         # XEP-0444 message reactions
+├── xml-utils.ts       # Shared XML/stanza utilities
 │
 ├── accounts.ts        # Account resolution utilities
 ├── normalize.ts       # JID normalization utilities
@@ -263,7 +265,7 @@ src/
 - [x] Phase 4: XEP-0085 typing, XEP-0333 receipts, XEP-0198 stream management, XEP-0199 keepalive, XEP-0461 replies
 - [x] Code Quality: Modular architecture, split monitor.ts into focused modules
 - [x] Phase 5: OMEMO encryption (XEP-0384) with Signal protocol
-- [ ] Phase 6: Message carbons (XEP-0280), message archive (XEP-0313)
+- [x] Phase 6: Message carbons (XEP-0280)
 
 ## XEP Support
 
@@ -271,11 +273,12 @@ src/
 |-----|------|--------|
 | XEP-0045 | Multi-User Chat | ✅ Implemented (join, invite, self-presence) |
 | XEP-0085 | Chat State Notifications | ✅ Implemented (typing indicators) |
+| XEP-0092 | Software Version | ✅ Implemented |
 | XEP-0163 | Personal Eventing Protocol (PEP) | ✅ Implemented |
 | XEP-0198 | Stream Management | ✅ Implemented (ack, resume) |
 | XEP-0199 | XMPP Ping | ✅ Implemented (30s keepalive) |
-| XEP-0280 | Message Carbons | ⏳ Planned |
-| XEP-0313 | Message Archive Management | ⏳ Planned |
+| XEP-0202 | Entity Time | ✅ Implemented |
+| XEP-0280 | Message Carbons | ✅ Implemented |
 | XEP-0333 | Chat Markers | ✅ Implemented (read receipts) |
 | XEP-0363 | HTTP File Upload | ✅ Implemented (auto-discovery) |
 | XEP-0384 | OMEMO Encryption | ✅ Implemented (legacy 0.3, always-trust) |

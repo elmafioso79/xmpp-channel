@@ -41,7 +41,7 @@ export async function handleInboundMessage(
     lastInboundAt: Date.now(),
   });
 
-  // Check allowlist - different logic for groups vs DMs
+  // Check allowlist - different logic for groups vs direct chats
   const senderBare = bareJid(message.from);
   
   // First check if sender is in allowFrom (owners) - they always have access
@@ -64,43 +64,38 @@ export async function handleInboundMessage(
       }
     }
   } else {
-    // For DMs: owners (allowFrom) always have access
+    // For direct chats: owners (allowFrom) always have access
     if (isOwner) {
-      log?.debug?.(`[XMPP] DM allowed (sender ${senderBare} is in allowFrom)`);
+      log?.debug?.(`[XMPP] Direct chat allowed (owner ${senderBare} is in allowFrom)`);
     } else {
-      // Non-owners: check dmPolicy and dms
+      // Non-owners (guests): check dmPolicy
       const dmPolicy = config.dmPolicy ?? "open";
       
       if (dmPolicy === "disabled") {
-        log?.debug?.(`[XMPP] DM blocked (dmPolicy: disabled)`);
+        log?.debug?.(`[XMPP] Direct chat blocked (dmPolicy: disabled, guest ${senderBare})`);
         return;
       } else if (dmPolicy === "open") {
-        log?.debug?.(`[XMPP] DM allowed (dmPolicy: open)`);
+        log?.debug?.(`[XMPP] Direct chat allowed (dmPolicy: open)`);
+      } else if (dmPolicy === "allowlist") {
+        // allowlist mode: only allowFrom JIDs (already checked above as owners)
+        log?.debug?.(`[XMPP] Direct chat blocked: guest ${senderBare} not in allowFrom`);
+        return;
       } else {
-        // dmPolicy === "allowlist"
-        const dms = normalizeAllowFrom(config.dms);
-        if (!isSenderAllowed(dms, senderBare)) {
-          log?.debug?.(`[XMPP] DM blocked: ${senderBare} not in dms (and not owner)`);
-          return;
-        }
+        // pairing or unknown policy - let OpenClaw core handle pairing flow
+        log?.debug?.(`[XMPP] Direct chat: guest ${senderBare}, dmPolicy=${dmPolicy}`);
       }
     }
   }
 
   // For groups, sender identity is the full occupant JID (room@conference/nickname)
-  // For DMs, sender identity is the bare JID (user@server)
+  // For direct chats, sender identity is the bare JID (user@server)
   const senderIdentity = message.isGroup ? message.from : senderBare;
   
   log?.info?.(`[XMPP] Inbound: from=${senderIdentity} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);  
 
-  // Simple command authorization - if sender is allowed, they can use commands
-  // Commands are handled by OpenClaw core when CommandAuthorized is true
-  const dmPolicy = config.dmPolicy ?? "open";
-  const dmsList = normalizeAllowFrom(config.dms);
-  const senderAllowedForDm = dmPolicy === "open" || (dmPolicy !== "disabled" && isSenderAllowed(dmsList, senderBare));
-  
-  // Authorize commands for any allowed sender
-  const commandAuthorized = senderAllowedForDm;
+  // Command authorization: owners (allowFrom) always authorized,
+  // guests authorized only when dmPolicy allows them through
+  const commandAuthorized = isOwner || (config.dmPolicy ?? "open") === "open";
   
   // Route to OpenClaw
   const route = rt.channel.routing.resolveAgentRoute({

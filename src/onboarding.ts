@@ -109,65 +109,71 @@ async function promptXmppCredentials(
 }
 
 /**
- * Prompt for XMPP allowFrom configuration
+ * Prompt for bot owner JIDs (allowFrom)
  */
-async function promptXmppAllowFrom(
+async function promptXmppOwners(
   cfg: OpenClawConfig,
   prompter: WizardPrompter,
-  options?: { forceAllowlist?: boolean }
 ): Promise<OpenClawConfig> {
-  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.dms as string[] | undefined;
-  const existingLabel = existing?.length ? existing.join(", ") : "unset (no DM allowlist)";
+  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.allowFrom as string[] | undefined;
+  const existingLabel = existing?.length ? existing.join(", ") : "none";
 
-  if (!options?.forceAllowlist) {
-    await prompter.note(
-      [
-        "XMPP direct chats are gated by `channels.xmpp.dmPolicy` + `channels.xmpp.dms`.",
-        "- disabled: block all incoming DMs entirely",
-        "- open (default): allow all incoming messages",
-        "- pairing: unknown senders get a pairing code; owner approves",
-        "- allowlist: only allow specific JIDs from dms",
-        "",
-        `Current dms: ${existingLabel}`,
-        `Docs: ${formatDocsLink("/xmpp", "xmpp")}`,
-      ].join("\n"),
-      "XMPP DM access"
-    );
-  }
+  await prompter.note(
+    [
+      "`allowFrom` defines the bot owners — JIDs that always have direct chat access",
+      "and can manage pairings. At least one owner JID is recommended.",
+      "",
+      `Current owners: ${existingLabel}`,
+    ].join("\n"),
+    "Bot owners"
+  );
+
+  const allowFromRaw = await prompter.text({
+    message: "Owner JIDs (comma-separated)",
+    placeholder: "owner@example.com, admin@example.com",
+    initialValue: existing?.join(", "),
+  });
+
+  const allowFromJids = allowFromRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((jid) => bareJid(jid));
+
+  return mergeXmppConfig(cfg, { allowFrom: allowFromJids.length > 0 ? allowFromJids : undefined });
+}
+
+/**
+ * Prompt for guest direct chat policy (used by dmPolicy adapter)
+ */
+async function promptXmppDmPolicy(
+  cfg: OpenClawConfig,
+  prompter: WizardPrompter,
+): Promise<OpenClawConfig> {
+  await prompter.note(
+    [
+      "`dmPolicy` controls what happens when someone NOT in allowFrom direct-chats the bot:",
+      "  - open (default): guests can message freely",
+      "  - disabled: only owners may direct-chat",
+      "  - pairing: guests get a pairing code; an owner must approve",
+      "  - allowlist: only allowFrom JIDs may direct-chat",
+      "",
+      `Docs: ${formatDocsLink("/xmpp", "xmpp")}`,
+    ].join("\n"),
+    "Guest direct chat policy"
+  );
 
   const policy = await prompter.select({
-    message: "XMPP DM policy",
+    message: "Direct chat policy for guests (non-owners)",
     options: [
-      { value: "disabled", label: "Disabled (block all DMs)" },
       { value: "open", label: "Open (allow all)" },
-      { value: "pairing", label: "Pairing (require approval)" },
-      { value: "allowlist", label: "Allowlist only" },
+      { value: "disabled", label: "Disabled (owners only)" },
+      { value: "pairing", label: "Pairing (require owner approval)" },
+      { value: "allowlist", label: "Allowlist only (only allowFrom JIDs)" },
     ],
   });
 
-  let next = mergeXmppConfig(cfg, { dmPolicy: policy });
-
-  if (policy === "allowlist") {
-    const dmsRaw = await prompter.text({
-      message: "Allowed JIDs for DMs (comma-separated)",
-      placeholder: "user1@example.com, user2@example.com",
-      initialValue: existing?.join(", "),
-    });
-
-    const dms = dmsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((jid) => bareJid(jid));
-
-    next = mergeXmppConfig(next, { dms });
-  } else if (policy === "open") {
-    next = mergeXmppConfig(next, { dms: ["*"] });
-  } else {
-    next = mergeXmppConfig(next, {}, { unsetOnUndefined: ["dms"] });
-  }
-
-  return next;
+  return mergeXmppConfig(cfg, { dmPolicy: policy });
 }
 
 /**
@@ -279,8 +285,8 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     // Prompt for credentials
     next = await promptXmppCredentials(next, prompter, accountId);
 
-    // Prompt for access policy
-    next = await promptXmppAllowFrom(next, prompter, { forceAllowlist: forceAllowFrom });
+    // Prompt for bot owner JIDs
+    next = await promptXmppOwners(next, prompter);
 
     // Prompt for MUC rooms
     next = await promptXmppMucs(next, prompter);
@@ -297,6 +303,7 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     return { cfg: next, accountId };
   },
 
+  // Guest DM policy is handled by the wizard's dedicated DM-policy pass
   dmPolicy: {
     label: "XMPP",
     channel,
@@ -304,7 +311,7 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     allowFromKey: "channels.xmpp.allowFrom",
     getCurrent: (cfg) => (cfg.channels?.xmpp as Record<string, unknown>)?.dmPolicy as string ?? "open",
     setPolicy: (cfg, policy) => mergeXmppConfig(cfg, { dmPolicy: policy }),
-    promptAllowFrom: async ({ cfg, prompter }) => promptXmppAllowFrom(cfg, prompter),
+    promptAllowFrom: async ({ cfg, prompter }) => promptXmppDmPolicy(cfg, prompter),
   },
 };
 

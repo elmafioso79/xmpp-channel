@@ -1,7 +1,7 @@
 import type { OpenClawConfig, RuntimeEnv, WizardPrompter } from "openclaw/plugin-sdk";
 
 /**
- * DM Policy type
+ * Direct chat policy type
  */
 export type DmPolicy = "disabled" | "open" | "pairing" | "allowlist";
 
@@ -80,10 +80,8 @@ export interface XmppConfig {
   dmPolicy?: DmPolicy;
   /** Group message policy */
   groupPolicy?: GroupPolicy;
-  /** Allowed sender JIDs (for pairing/groups) */
+  /** Bot owner / trusted JIDs — always have direct chat access */
   allowFrom?: string[];
-  /** Allowed sender JIDs for DMs (separate from allowFrom) */
-  dms?: string[];
   /** Allowed sender JIDs for groups (if different from allowFrom) */
   groupAllowFrom?: string[];
   /** MUC rooms to join */
@@ -121,7 +119,6 @@ export interface XmppAccountDescriptor {
   configured: boolean;
   dmPolicy?: DmPolicy;
   allowFrom?: string[];
-  dms?: string[];
 }
 
 /**

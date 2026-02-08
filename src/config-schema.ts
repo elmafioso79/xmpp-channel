@@ -73,17 +73,14 @@ export const XmppAccountSchema = z.object({
   /** MUC nickname (what's shown in group chats) */
   mucNick: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
 
-  /** Direct message policy */
-  dmPolicy: z.enum(["disabled", "open", "pairing", "allowlist"]).optional().default("open").describe("Direct message policy: disabled (block all DMs), open (allow all), pairing (require pairing), allowlist (only dms)"),
-
-  /** Allowed sender JIDs for DMs (separate from allowFrom) */
-  dms: z.array(z.string()).optional().describe("Allowed sender JIDs for DMs when dmPolicy is allowlist (use * for all)"),
+  /** Direct chat policy for guests (JIDs not in allowFrom) */
+  dmPolicy: z.enum(["disabled", "open", "pairing", "allowlist"]).optional().default("open").describe("Direct chat policy: disabled (owners only), open (allow all), pairing (require pairing), allowlist (only allowFrom JIDs)"),
 
   /** Group message policy */
   groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
 
-  /** Allowed sender JIDs (for pairing/groups) */
-  allowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for pairing/groups (use * for all)"),
+  /** Bot owner / trusted JIDs — always have direct chat access; also serves as allowlist when dmPolicy is 'allowlist' */
+  allowFrom: z.array(z.string()).optional().describe("Bot owner JIDs (always have direct chat access). Also the allowlist when dmPolicy is 'allowlist'."),
 
   /** Allowed sender JIDs for groups */
   groupAllowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for groups (defaults to allowFrom, use * for all)"),

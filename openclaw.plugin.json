@@ -2,7 +2,7 @@
   "id": "xmpp",
   "name": "XMPP Channel",
   "description": "XMPP/Jabber channel plugin for Prosody, ejabberd, and other XMPP servers",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "channels": ["xmpp"],
   "configSchema": {
     "type": "object",
@@ -47,12 +47,7 @@
         "type": "string",
         "enum": ["disabled", "open", "pairing", "allowlist"],
         "default": "open",
-        "description": "Direct message policy"
-      },
-      "dms": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Allowed sender JIDs for DMs when dmPolicy is allowlist (use * for all)"
+        "description": "Guest direct chat policy: disabled (owners only), open (allow all), pairing (require approval), allowlist (only allowFrom)"
       },
       "groupPolicy": {
         "type": "string",
@@ -63,7 +58,7 @@
       "allowFrom": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "Allowed sender JIDs for pairing/groups (use * for all)"
+        "description": "Bot owner JIDs (always have direct chat access; also the allowlist when dmPolicy is 'allowlist')"
       },
       "groupAllowFrom": {
         "type": "array",
@@ -114,10 +109,9 @@
             "name": { "type": "string", "description": "Account display name" },
             "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
             "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
-            "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "DM policy" },
-            "dms": { "type": "array", "items": { "type": "string" }, "description": "Allowed DM senders" },
+            "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "Guest direct chat policy" },
             "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
-            "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed senders for pairing/groups" },
+            "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Bot owner JIDs (always have direct chat access)" },
             "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
             "mucs": { "type": "array", "items": { "type": "string" }, "description": "MUC rooms to join" },
             "actions": { "type": "object", "description": "Action configuration" },
