@@ -109,6 +109,10 @@ declare module "openclaw/plugin-sdk" {
   export function buildChannelConfigSchema(schema: unknown): { schema: Record<string, unknown> };
   export function formatDocsLink(path: string, label: string): string;
   export function formatPairingApproveHint(channel: string): string;
+
+  /** Wrap a payload into an AgentToolResult with proper content array */
+  export function jsonResult(payload: unknown): { content: Array<{ type: string; text: string }>; details?: unknown };
+
   export function promptAccountId(params: {
     cfg: OpenClawConfig;
     prompter: WizardPrompter;

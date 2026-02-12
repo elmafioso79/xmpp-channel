@@ -3,6 +3,7 @@
  */
 
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import { jsonResult } from "openclaw/plugin-sdk";
 import type { ChannelMessageActionName } from "./types.js";
 import { getActiveClient } from "./monitor.js";
 import { resolveXmppAccount } from "./accounts.js";
@@ -61,11 +62,11 @@ export async function handleXmppAction(params: {
   messageId: string;
   emoji?: string;
   remove?: boolean;
-}): Promise<{ ok: boolean; error?: string }> {
+}) {
   const { action, cfg, accountId, chatJid, messageId, emoji, remove } = params;
 
   if (action !== "react") {
-    return { ok: false, error: `Unsupported action: ${action}` };
+    throw new Error(`Unsupported XMPP action: ${action}`);
   }
 
   const account = resolveXmppAccount({ cfg, accountId });
@@ -74,13 +75,13 @@ export async function handleXmppAction(params: {
 
   const gate = createActionGate(actionsConfig);
   if (!gate("reactions")) {
-    return { ok: false, error: "XMPP reactions are disabled" };
+    throw new Error("XMPP reactions are disabled");
   }
 
   const config = account.config;
   const client = getActiveClient(account.accountId);
   if (!client) {
-    return { ok: false, error: "XMPP client not connected" };
+    throw new Error("XMPP client not connected");
   }
 
   try {
@@ -113,13 +114,13 @@ export async function handleXmppAction(params: {
 
     await client.send(message);
 
-    return {
-      ok: true,
-      ...(remove ? { removed: true } : { added: emoji || "👍" }),
-    };
+    if (remove) {
+      return jsonResult({ ok: true, removed: true });
+    }
+    return jsonResult({ ok: true, added: emoji || "👍" });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    return { ok: false, error };
+    throw new Error(`XMPP reaction failed: ${error}`);
   }
 }
 
@@ -151,11 +152,11 @@ export const xmppMessageActions = {
     }
 
     if (!chatJid) {
-      return { ok: false, error: "Target JID is required (pass chatJid, to, or use within a session context)" };
+      throw new Error("Target JID is required (pass chatJid, to, or use within a session context)");
     }
 
     if (!messageId) {
-      return { ok: false, error: "messageId is required" };
+      throw new Error("messageId is required");
     }
 
     return handleXmppAction({

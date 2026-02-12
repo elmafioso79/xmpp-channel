@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-02-12
+
+### Fixed
+
+- **Actions crash: "Cannot read properties of undefined (reading 'filter')"** — `handleAction` now returns proper `AgentToolResult` via `jsonResult()` instead of a plain object; errors are thrown instead of returned (matching WhatsApp/BlueBubbles pattern)
+- **SDK type declarations** — Added `jsonResult` export to `declarations.d.ts`
+
 ## [0.3.3] - 2026-02-12
 
 ### Added
