@@ -65,8 +65,11 @@ export async function handleXmppAction(params: {
 }) {
   const { action, cfg, accountId, chatJid, messageId, emoji, remove } = params;
 
+  // Safety: strip xmpp: prefix if it leaked through
+  const targetJid = chatJid.replace(/^xmpp:/, "");
+
   // Log action attempt for debugging
-  console.log(`[XMPP:actions] handleXmppAction: action=${action} chatJid=${chatJid} messageId=${messageId} emoji=${emoji} accountId=${accountId} remove=${remove}`);
+  console.log(`[XMPP:actions] handleXmppAction: action=${action} chatJid=${targetJid} messageId=${messageId} emoji=${emoji} accountId=${accountId} remove=${remove}`);
 
   if (action !== "react") {
     return jsonResult({ ok: false, error: `Unsupported XMPP action: ${action}` });
@@ -97,7 +100,7 @@ export async function handleXmppAction(params: {
     // </message>
 
     // Determine message type: groupchat for MUC rooms, chat for DMs
-    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(chatJid));
+    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(targetJid));
     const msgType = isMuc ? "groupchat" : "chat";
 
     const reactions = remove
@@ -110,12 +113,12 @@ export async function handleXmppAction(params: {
 
     const message = xml(
       "message",
-      { to: chatJid, type: msgType, id: `reaction_${Date.now()}` },
+      { to: targetJid, type: msgType, id: `reaction_${Date.now()}` },
       reactions,
       xml("store", { xmlns: "urn:xmpp:hints" })
     );
 
-    console.log(`[XMPP:actions] Sending reaction stanza: to=${chatJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"} stanza=${message.toString().slice(0, 300)}`);
+    console.log(`[XMPP:actions] Sending reaction stanza: to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"} stanza=${message.toString().slice(0, 300)}`);
 
     await client.send(message);
 
@@ -153,7 +156,11 @@ export const xmppMessageActions = {
     // Resolve target: chatJid > to > toolContext.currentChannelId (same pattern as WhatsApp)
     let chatJid = (actionParams.chatJid as string) || (actionParams.to as string);
     if (!chatJid && toolContext?.currentChannelId) {
-      chatJid = toolContext.currentChannelId.replace(/^xmpp:/, "");
+      chatJid = toolContext.currentChannelId;
+    }
+    // Always strip channel prefix — LLM may pass "xmpp:user@server"
+    if (chatJid) {
+      chatJid = chatJid.replace(/^xmpp:/, "");
     }
 
     if (!chatJid) {
