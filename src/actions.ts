@@ -66,7 +66,7 @@ export async function handleXmppAction(params: {
   const { action, cfg, accountId, chatJid, messageId, emoji, remove } = params;
 
   if (action !== "react") {
-    throw new Error(`Unsupported XMPP action: ${action}`);
+    return jsonResult({ ok: false, error: `Unsupported XMPP action: ${action}` });
   }
 
   const account = resolveXmppAccount({ cfg, accountId });
@@ -75,13 +75,13 @@ export async function handleXmppAction(params: {
 
   const gate = createActionGate(actionsConfig);
   if (!gate("reactions")) {
-    throw new Error("XMPP reactions are disabled");
+    return jsonResult({ ok: false, error: "XMPP reactions are disabled — set actions.reactions: true in config" });
   }
 
   const config = account.config;
   const client = getActiveClient(account.accountId);
   if (!client) {
-    throw new Error("XMPP client not connected");
+    return jsonResult({ ok: false, error: "XMPP client not connected" });
   }
 
   try {
@@ -120,7 +120,7 @@ export async function handleXmppAction(params: {
     return jsonResult({ ok: true, added: emoji || "👍" });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    throw new Error(`XMPP reaction failed: ${error}`);
+    return jsonResult({ ok: false, error: `XMPP reaction failed: ${error}` });
   }
 }
 
@@ -152,22 +152,27 @@ export const xmppMessageActions = {
     }
 
     if (!chatJid) {
-      throw new Error("Target JID is required (pass chatJid, to, or use within a session context)");
+      return jsonResult({ ok: false, error: "Target JID is required (pass chatJid, to, or use within a session context)" });
     }
 
     if (!messageId) {
-      throw new Error("messageId is required");
+      return jsonResult({ ok: false, error: "messageId is required for reactions" });
     }
 
-    return handleXmppAction({
-      action,
-      cfg,
-      accountId,
-      chatJid: bareJid(chatJid),
-      messageId,
-      emoji,
-      remove,
-    });
+    try {
+      return await handleXmppAction({
+        action,
+        cfg,
+        accountId,
+        chatJid: bareJid(chatJid),
+        messageId,
+        emoji,
+        remove,
+      });
+    } catch (err) {
+      // Always return jsonResult so content[] is never undefined in session history
+      return jsonResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
   },
 
   extractToolSend: () => null,

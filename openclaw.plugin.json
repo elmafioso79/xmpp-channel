@@ -2,7 +2,7 @@
   "id": "xmpp",
   "name": "XMPP Channel",
   "description": "XMPP/Jabber channel plugin for Prosody, ejabberd, and other XMPP servers",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "channels": ["xmpp"],
   "configSchema": {
     "type": "object",

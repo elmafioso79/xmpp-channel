@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-02-12
+
+### Fixed
+
+- **Actions: never throw, always return `jsonResult()`** — Every error path in `handleAction` / `handleXmppAction` now returns `jsonResult({ ok: false, error })` instead of throwing. This ensures `toolResult` messages in the session history always have a `content[]` array, preventing the LLM provider crash (`msg.content.filter(...)` on undefined). Old sessions with broken tool results from pre-v0.3.4 may still trigger this — start a fresh conversation to clear them.
+
 ## [0.3.4] - 2026-02-12
 
 ### Fixed
