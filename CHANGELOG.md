@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-02-12
+
+### Added
+
+- **XEP-0333 Read Receipts** — Bot sends `displayed` chat markers for incoming DMs
+  - New `sendReadReceipts` config option (default `true`), configurable at root and per-account level
+  - Follows WhatsApp channel parity: defaults on, skips group chats, errors are non-fatal
+- **XEP-0444 Inbound reaction detection** — Incoming reactions are logged and skipped (no AI processing)
+
+### Fixed
+
+- **OMEMO fallback body suppression** — No longer processes plaintext `<body>` on OMEMO-encrypted stanzas (prevents AI from responding to "I sent you an encrypted message" notices)
+- **Actions adapter improvements** — Correct `type` attribute on reaction stanzas (`chat`/`groupchat`), added `<store>` hint (XEP-0334), improved target resolution with `toolContext` fallback, bare JID normalization
+
 ## [0.3.2] - 2026-02-11
 
 ### Changed

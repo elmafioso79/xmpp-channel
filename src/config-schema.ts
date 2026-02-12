@@ -103,6 +103,9 @@ export const XmppAccountSchema = z.object({
   /** Per-group settings (keyed by room JID or "*" for default) */
   groupSettings: z.record(z.string(), XmppGroupConfigSchema).optional().describe("Per-group settings for tool policies and mentions"),
 
+  /** Send read receipts for incoming messages (XEP-0333, default true) */
+  sendReadReceipts: z.boolean().optional().describe("Send read receipts (XEP-0333 chat markers) for incoming messages (default: true)"),
+
   /** OMEMO encryption configuration */
   omemo: XmppOmemoConfigSchema.optional().describe("OMEMO encryption settings (XEP-0384)"),
 });

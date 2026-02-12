@@ -96,6 +96,8 @@ export interface XmppConfig {
   heartbeatVisibility?: "visible" | "hidden";
   /** Per-group settings (keyed by room JID or "*" for default) */
   groupSettings?: Record<string, XmppGroupConfig>;
+  /** Send read receipts for incoming messages (XEP-0333, default true) */
+  sendReadReceipts?: boolean;
   /** OMEMO encryption configuration */
   omemo?: XmppOmemoConfig;
   /** Multi-account configuration */

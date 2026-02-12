@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ChannelMessageActionName } from "./types.js";
 import { getActiveClient } from "./monitor.js";
 import { resolveXmppAccount } from "./accounts.js";
+import { bareJid } from "./config-schema.js";
 import { xml } from "@xmpp/client";
 
 /**
@@ -76,6 +77,7 @@ export async function handleXmppAction(params: {
     return { ok: false, error: "XMPP reactions are disabled" };
   }
 
+  const config = account.config;
   const client = getActiveClient(account.accountId);
   if (!client) {
     return { ok: false, error: "XMPP client not connected" };
@@ -83,11 +85,16 @@ export async function handleXmppAction(params: {
 
   try {
     // XEP-0444: Message Reactions
-    // <message to="chat@example.com" id="reaction-1">
+    // <message to="chat@example.com" type="chat" id="reaction-1">
     //   <reactions id="original-message-id" xmlns="urn:xmpp:reactions:0">
     //     <reaction>👍</reaction>
     //   </reactions>
+    //   <store xmlns="urn:xmpp:hints"/>
     // </message>
+
+    // Determine message type: groupchat for MUC rooms, chat for DMs
+    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(chatJid));
+    const msgType = isMuc ? "groupchat" : "chat";
 
     const reactions = remove
       ? xml("reactions", { id: messageId, xmlns: "urn:xmpp:reactions:0" })
@@ -99,8 +106,9 @@ export async function handleXmppAction(params: {
 
     const message = xml(
       "message",
-      { to: chatJid, id: `reaction_${Date.now()}` },
-      reactions
+      { to: chatJid, type: msgType, id: `reaction_${Date.now()}` },
+      reactions,
+      xml("store", { xmlns: "urn:xmpp:hints" })
     );
 
     await client.send(message);
@@ -128,16 +136,22 @@ export const xmppMessageActions = {
     params: Record<string, unknown>;
     cfg: OpenClawConfig;
     accountId?: string | null;
+    toolContext?: { currentChannelId?: string; currentThreadId?: string };
   }) => {
-    const { action, params: actionParams, cfg, accountId } = params;
+    const { action, params: actionParams, cfg, accountId, toolContext } = params;
 
-    const chatJid = actionParams.chatJid as string;
     const messageId = actionParams.messageId as string;
     const emoji = actionParams.emoji as string | undefined;
-    const remove = actionParams.remove as boolean | undefined;
+    const remove = typeof actionParams.remove === "boolean" ? actionParams.remove : undefined;
+
+    // Resolve target: chatJid > to > toolContext.currentChannelId (same pattern as WhatsApp)
+    let chatJid = (actionParams.chatJid as string) || (actionParams.to as string);
+    if (!chatJid && toolContext?.currentChannelId) {
+      chatJid = toolContext.currentChannelId.replace(/^xmpp:/, "");
+    }
 
     if (!chatJid) {
-      return { ok: false, error: "chatJid is required" };
+      return { ok: false, error: "Target JID is required (pass chatJid, to, or use within a session context)" };
     }
 
     if (!messageId) {
@@ -148,7 +162,7 @@ export const xmppMessageActions = {
       action,
       cfg,
       accountId,
-      chatJid,
+      chatJid: bareJid(chatJid),
       messageId,
       emoji,
       remove,

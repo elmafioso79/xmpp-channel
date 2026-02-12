@@ -400,7 +400,12 @@ function setupMessageHandler(
     let body: string | null = null;
     let wasEncrypted = false;
     
-    if (isOmemoEnabled(accountId) && isOmemoEncrypted(stanza as Element)) {
+    // Detect if this stanza is OMEMO-encrypted (either via <encrypted> element or EME hint)
+    const hasOmemoEncryption = isOmemoEncrypted(stanza as Element);
+    const emeHint = stanza.getChild("encryption", "urn:xmpp:eme:0");
+    const isOmemoStanza = hasOmemoEncryption || emeHint?.attrs?.name === "OMEMO";
+    
+    if (isOmemoEnabled(accountId) && hasOmemoEncryption) {
       log?.debug?.(`[${accountId}] OMEMO encrypted message detected`);
       try {
         body = await decryptOmemoMessage(accountId, stanza as Element, log);
@@ -415,12 +420,34 @@ function setupMessageHandler(
       }
     }
     
-    // Fallback to plain body if not encrypted or decryption failed
-    if (!body) {
+    // If the stanza was OMEMO-encrypted (or has EME hint), NEVER fall back to
+    // the plaintext <body>. That body is just a fallback notice for non-OMEMO
+    // clients (e.g. "I sent you an OMEMO encrypted message but your client
+    // doesn't seem to support that."). Processing it as real content causes
+    // the AI to "complain" about unreadable messages at session start.
+    if (!body && !isOmemoStanza) {
       body = stanza.getChildText("body");
+    } else if (!body && isOmemoStanza) {
+      log?.debug?.(`[${accountId}] OMEMO message could not be decrypted, ignoring fallback body`);
     }
     
     log?.debug?.(`[${accountId}] XMPP message stanza: body=${body ? `"${body.slice(0, 50)}"` : "null"} encrypted=${wasEncrypted}`);
+
+    // XEP-0444: Detect incoming reactions (reactions have no body)
+    const reactionsEl = stanza.getChild("reactions", "urn:xmpp:reactions:0");
+    if (reactionsEl) {
+      const reactedMsgId = reactionsEl.attrs.id;
+      const reactionChildren = reactionsEl.getChildren("reaction");
+      const emojis = reactionChildren.map((r) => r.text?.() ?? "").filter(Boolean);
+      const senderBare = bareJid(from);
+      if (emojis.length > 0) {
+        log?.info?.(`[${accountId}] XEP-0444 reaction from ${senderBare}: ${emojis.join(", ")} on message ${reactedMsgId}`);
+      } else {
+        log?.info?.(`[${accountId}] XEP-0444 reaction removed by ${senderBare} on message ${reactedMsgId}`);
+      }
+      // Reactions don't have a body — skip normal message processing
+      return;
+    }
     
     if (!body) return;
 

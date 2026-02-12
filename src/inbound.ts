@@ -12,7 +12,7 @@ import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
 import { sendXmppMedia } from "./outbound.js";
 import type { XmppConfig, XmppInboundMessage, Logger, ChannelAccountStatusPatch } from "./types.js";
 import { activeClients } from "./state.js";
-import { sendChatState } from "./chat-state.js";
+import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, isRoomOmemoCapable, buildOmemoMessageStanza } from "./omemo/index.js";
 
 /**
@@ -96,7 +96,19 @@ export async function handleInboundMessage(
   // For direct chats, sender identity is the bare JID (user@server)
   const senderIdentity = message.isGroup ? message.from : senderBare;
   
-  log?.info?.(`[XMPP] Inbound: from=${senderIdentity} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);  
+  log?.info?.(`[XMPP] Inbound: from=${senderIdentity} isGroup=${message.isGroup} body="${message.body.slice(0, 50)}..."`);
+
+  // XEP-0333: Send read receipt (displayed marker) if enabled
+  const sendReadReceipts = config.sendReadReceipts !== false; // default true
+  if (sendReadReceipts && message.id && !message.isGroup) {
+    try {
+      await sendChatMarker(accountId, senderBare, message.id, "displayed", log);
+    } catch (err) {
+      log?.warn?.(`[XMPP] Failed to send read receipt: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else if (!sendReadReceipts) {
+    log?.debug?.(`[XMPP] Read receipts disabled, skipping for message ${message.id}`);
+  }
 
   // Command authorization: owners (allowFrom) always authorized,
   // guests authorized only when dmPolicy allows them through
