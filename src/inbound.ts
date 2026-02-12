@@ -144,7 +144,7 @@ export async function handleInboundMessage(
     SenderId: senderIdentity,
     Provider: "xmpp",
     Surface: "xmpp",
-    MessageSid: message.id || `xmpp-${Date.now()}`,
+    MessageSid: message.stanzaId || message.id || `xmpp-${Date.now()}`,
     OriginatingChannel: "xmpp" as const,
     OriginatingTo: `xmpp:${message.isGroup ? message.roomJid : senderBare}`,
     CommandAuthorized: commandAuthorized,

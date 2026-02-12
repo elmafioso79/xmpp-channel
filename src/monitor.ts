@@ -506,6 +506,11 @@ function setupMessageHandler(
       senderNick,
       replyToId,
       replyToBody,
+      // XEP-0359: Capture server-assigned stanza-id (preferred for reactions/references)
+      stanzaId: (() => {
+        const stanzaIdEl = stanza.getChild("stanza-id", "urn:xmpp:sid:0");
+        return stanzaIdEl?.attrs?.id || undefined;
+      })(),
       wasEncrypted,
       // For MUC, we need the actual sender JID for OMEMO encryption
       // This is extracted from the stanza's 'from' attribute before we modified senderJid

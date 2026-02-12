@@ -142,6 +142,8 @@ export interface XmppInboundMessage {
   replyToId?: string;
   /** XEP-0461: Body of message being replied to (from fallback) */
   replyToBody?: string;
+  /** XEP-0359: Server-assigned stanza ID (preferred for reactions/references) */
+  stanzaId?: string;
   /** True if the incoming message was OMEMO encrypted */
   wasEncrypted?: boolean;
   /** Sender JID for OMEMO encryption (bare JID, needed for MUC) */

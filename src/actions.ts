@@ -65,6 +65,9 @@ export async function handleXmppAction(params: {
 }) {
   const { action, cfg, accountId, chatJid, messageId, emoji, remove } = params;
 
+  // Log action attempt for debugging
+  console.log(`[XMPP:actions] handleXmppAction: action=${action} chatJid=${chatJid} messageId=${messageId} emoji=${emoji} accountId=${accountId} remove=${remove}`);
+
   if (action !== "react") {
     return jsonResult({ ok: false, error: `Unsupported XMPP action: ${action}` });
   }
@@ -111,6 +114,8 @@ export async function handleXmppAction(params: {
       reactions,
       xml("store", { xmlns: "urn:xmpp:hints" })
     );
+
+    console.log(`[XMPP:actions] Sending reaction stanza: to=${chatJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"} stanza=${message.toString().slice(0, 300)}`);
 
     await client.send(message);
 

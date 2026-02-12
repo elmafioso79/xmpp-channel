@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-02-12
+
+### Fixed
+
+- **Reactions: use XEP-0359 stanza-id for message references** — The `<reactions>` stanza now references the server-assigned `stanza-id` (XEP-0359) instead of the sender's stanza `id` attribute. Most XMPP clients (Conversations, Gajim, Dino) index messages by stanza-id, so reactions referencing the wrong ID were silently ignored.
+- **MessageSid prefers stanza-id** — The `MessageSid` field in OpenClaw context now uses the server-assigned stanza-id when available, making the LLM's message references match what the receiving client expects.
+- **Action handler logging** — Added console logging to `handleXmppAction` for debugging reaction delivery (logs target JID, messageId, emoji, and the full stanza).
+
 ## [0.3.5] - 2026-02-12
 
 ### Fixed
