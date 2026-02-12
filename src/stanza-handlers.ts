@@ -113,8 +113,8 @@ function handlePresenceError(
   // Handle specific error conditions
   if (errorCondition === "conflict") {
     // Nick conflict should be rare now that we use unique resources per session
-    // If it still happens, it's likely a config issue (same mucNick on multiple instances)
-    log?.error?.(`[${accountId}] MUC nick conflict in ${roomJid} - check if another instance is using the same mucNick`);
+    // If it still happens, it's likely a config issue (same nickname on multiple instances)
+    log?.error?.(`[${accountId}] MUC nick conflict in ${roomJid} - check if another instance is using the same nickname`);
   } else if (errorCondition === "gone") {
     // Room no longer exists
     goneRooms.add(roomJid);
@@ -135,7 +135,7 @@ function handlePresenceError(
 export function setupMucInviteHandler(
   xmpp: ReturnType<typeof client>,
   accountId: string,
-  mucNick: string,
+  nickname: string,
   log?: Logger
 ): void {
   xmpp.on("stanza", async (stanza) => {
@@ -157,6 +157,6 @@ export function setupMucInviteHandler(
     
     log?.info?.(`[${accountId}] MUC invite: room=${roomJid} from=${inviterJid} reason="${reason}"`);
     
-    await handleMucInvite(xmpp, roomJid, inviterJid, mucNick, accountId, log);
+    await handleMucInvite(xmpp, roomJid, inviterJid, nickname, accountId, log);
   });
 }

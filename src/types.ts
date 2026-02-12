@@ -68,8 +68,8 @@ export interface XmppConfig {
   port?: number;
   /** XMPP resource identifier (auto-generated for uniqueness) */
   resource?: string;
-  /** MUC nickname (what's shown in group chats) */
-  mucNick?: string;
+  /** Nickname shown in group chats */
+  nickname?: string;
   /** Account display name */
   name?: string;
   /** Whether this account is enabled */
@@ -82,18 +82,20 @@ export interface XmppConfig {
   groupPolicy?: GroupPolicy;
   /** Bot owner / trusted JIDs — always have direct chat access */
   allowFrom?: string[];
+  /** DM allowlist — additional JIDs allowed to direct-chat when dmPolicy is 'allowlist' (owners always have access regardless) */
+  dmAllowlist?: string[];
   /** Allowed sender JIDs for groups (if different from allowFrom) */
   groupAllowFrom?: string[];
-  /** MUC rooms to join */
-  mucs?: string[];
+  /** Group chat rooms to join */
+  groups?: string[];
   /** Action configuration (reactions, etc.) */
   actions?: XmppActionConfig;
   /** Inbound message prefix */
   messagePrefix?: string;
   /** Heartbeat visibility */
   heartbeatVisibility?: "visible" | "hidden";
-  /** Per-group configuration (keyed by room JID or "*" for default) */
-  groups?: Record<string, XmppGroupConfig>;
+  /** Per-group settings (keyed by room JID or "*" for default) */
+  groupSettings?: Record<string, XmppGroupConfig>;
   /** OMEMO encryption configuration */
   omemo?: XmppOmemoConfig;
   /** Multi-account configuration */

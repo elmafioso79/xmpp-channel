@@ -70,23 +70,26 @@ export const XmppAccountSchema = z.object({
   /** XMPP resource identifier (internal, auto-generated if not set) */
   resource: z.string().optional().describe("XMPP resource identifier (auto-generated for uniqueness)"),
 
-  /** MUC nickname (what's shown in group chats) */
-  mucNick: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
+  /** Nickname shown in group chats (defaults to local part of JID, e.g., 'Aurora') */
+  nickname: z.string().optional().describe("Display name in group chats (defaults to local part of JID, e.g., 'Aurora')"),
 
   /** Direct chat policy for guests (JIDs not in allowFrom) */
-  dmPolicy: z.enum(["disabled", "open", "pairing", "allowlist"]).optional().default("open").describe("Direct chat policy: disabled (owners only), open (allow all), pairing (require pairing), allowlist (only allowFrom JIDs)"),
+  dmPolicy: z.enum(["disabled", "open", "pairing", "allowlist"]).optional().default("open").describe("Direct chat policy: disabled (owners only), open (allow all), pairing (require pairing), allowlist (only dmAllowlist JIDs)"),
 
   /** Group message policy */
   groupPolicy: z.enum(["open", "allowlist"]).optional().default("open").describe("Group message policy: open (respond to all), allowlist (require mention or allowlist)"),
 
-  /** Bot owner / trusted JIDs — always have direct chat access; also serves as allowlist when dmPolicy is 'allowlist' */
-  allowFrom: z.array(z.string()).optional().describe("Bot owner JIDs (always have direct chat access). Also the allowlist when dmPolicy is 'allowlist'."),
+  /** Bot owner / trusted JIDs — always have direct chat access */
+  allowFrom: z.array(z.string()).optional().describe("Bot owner JIDs (always have direct chat access, cannot be removed by guests)"),
+
+  /** DM allowlist — additional JIDs allowed to direct-chat when dmPolicy is 'allowlist' */
+  dmAllowlist: z.array(z.string()).optional().describe("JIDs allowed to direct-chat when dmPolicy is 'allowlist' (owners always have access regardless)"),
 
   /** Allowed sender JIDs for groups */
   groupAllowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for groups (defaults to allowFrom, use * for all)"),
 
-  /** MUC rooms to join */
-  mucs: z.array(z.string()).optional().describe("MUC rooms to join on startup"),
+  /** Group chat rooms to join */
+  groups: z.array(z.string()).optional().describe("Group chat rooms to join on startup"),
 
   /** Action configuration */
   actions: XmppActionSchema.optional().describe("Action configuration (reactions, sendMessage)"),
@@ -97,8 +100,8 @@ export const XmppAccountSchema = z.object({
   /** Heartbeat visibility */
   heartbeatVisibility: z.enum(["visible", "hidden"]).optional().describe("Heartbeat visibility in status"),
 
-  /** Per-group configuration (keyed by room JID or "*" for default) */
-  groups: z.record(z.string(), XmppGroupConfigSchema).optional().describe("Per-group configuration for tool policies and mentions"),
+  /** Per-group settings (keyed by room JID or "*" for default) */
+  groupSettings: z.record(z.string(), XmppGroupConfigSchema).optional().describe("Per-group settings for tool policies and mentions"),
 
   /** OMEMO encryption configuration */
   omemo: XmppOmemoConfigSchema.optional().describe("OMEMO encryption settings (XEP-0384)"),

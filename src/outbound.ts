@@ -2,16 +2,19 @@ import { xml } from "@xmpp/client";
 import type { XmppConfig, SendResult, Logger } from "./types.js";
 import { getActiveClient } from "./monitor.js";
 import { bareJid, resolveServer } from "./config-schema.js";
-import { getUploadService, uploadAndGetUrl, buildOobElement } from "./http-upload.js";
-import * as https from "https";
-import * as http from "http";
-import * as fs from "fs";
-import * as path from "path";
-import { URL } from "url";
-import { lookup as mimeLookup } from "mime-types";
+import { getUploadService, uploadAndGetUrl, buildOobElement, downloadUrl } from "./http-upload.js";
+import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, buildOmemoMessageStanza, isRoomOmemoCapable } from "./omemo/index.js";
+
+export interface ResolvedMedia {
+  data: Buffer;
+  contentType: string;
+  filename: string;
+}
 
 /**
  * Send a text message via XMPP
+ * When OMEMO is enabled, always encrypts. On encryption failure, sends
+ * an unencrypted warning (never the actual message content).
  */
 export async function sendXmppMessage(
   config: XmppConfig,
@@ -28,10 +31,47 @@ export async function sendXmppMessage(
   }
 
   try {
-    // Determine if this is a MUC or direct message
-    const isMuc = config.mucs?.some((muc) => bareJid(muc) === bareJid(to));
+    // Determine if this is a group room or direct message
+    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(to));
     const msgType = isMuc ? "groupchat" : "chat";
 
+    // When OMEMO is enabled, always encrypt outbound messages
+    if (isOmemoEnabled(accountId)) {
+      try {
+        const encryptedElement = isMuc
+          ? await encryptMucOmemoMessage(accountId, bareJid(to), text, log)
+          : await encryptOmemoMessage(accountId, bareJid(to), text, log);
+
+        if (encryptedElement) {
+          const encryptedStanza = buildOmemoMessageStanza(to, encryptedElement, msgType);
+          await client.send(encryptedStanza);
+          log?.debug?.(`[XMPP] Sent OMEMO encrypted message to ${to}`);
+          return { ok: true, messageId: encryptedStanza.attrs.id };
+        }
+
+        // Encryption returned null — send warning, not the actual text
+        log?.warn?.(`[XMPP] OMEMO encryption returned empty for ${to}, sending warning`);
+        const warnMsg = xml(
+          "message",
+          { to, type: msgType, id: `msg_${Date.now()}` },
+          xml("body", {}, "⚠️ Failed to encrypt message (OMEMO encryption returned empty). Message not sent for security.")
+        );
+        await client.send(warnMsg);
+        return { ok: false, error: "OMEMO encryption failed (returned empty)" };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log?.error?.(`[XMPP] OMEMO encryption error for ${to}: ${errMsg}, sending warning`);
+        const warnMsg = xml(
+          "message",
+          { to, type: msgType, id: `msg_${Date.now()}` },
+          xml("body", {}, `⚠️ Failed to encrypt message: ${errMsg}. Message not sent for security.`)
+        );
+        await client.send(warnMsg);
+        return { ok: false, error: `OMEMO encryption failed: ${errMsg}` };
+      }
+    }
+
+    // OMEMO not enabled — send plaintext
     const messageId = `msg_${Date.now()}`;
     const message = xml(
       "message",
@@ -88,106 +128,6 @@ export async function sendPresence(
 }
 
 /**
- * Check if a string is a URL
- */
-function isUrl(str: string): boolean {
-  try {
-    const url = new URL(str);
-    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "file:";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Fetch data from a URL or read from local file
- */
-async function fetchUrl(urlOrPath: string, log?: Logger): Promise<{ data: Buffer; contentType: string; filename: string }> {
-  // Check if it's a local file path (not a URL)
-  if (!isUrl(urlOrPath)) {
-    // Try to resolve as a local file path
-    log?.debug?.(`[XMPP] Treating as local file path: ${urlOrPath}`);
-    
-    // Try different possible paths
-    const possiblePaths = [
-      urlOrPath,
-      path.resolve(urlOrPath),
-      path.resolve(process.cwd(), urlOrPath),
-    ];
-    
-    for (const filePath of possiblePaths) {
-      try {
-        if (fs.existsSync(filePath)) {
-          log?.debug?.(`[XMPP] Reading local file: ${filePath}`);
-          const data = fs.readFileSync(filePath);
-          const ext = path.extname(filePath);
-          const contentType = mimeLookup(ext) || "application/octet-stream";
-          const filename = path.basename(filePath);
-          return { data, contentType, filename };
-        }
-      } catch (err) {
-        log?.debug?.(`[XMPP] Failed to read ${filePath}: ${err}`);
-      }
-    }
-    
-    throw new Error(`File not found: ${urlOrPath}`);
-  }
-  
-  // Handle file:// URLs
-  const urlObj = new URL(urlOrPath);
-  if (urlObj.protocol === "file:") {
-    const filePath = urlObj.pathname;
-    log?.debug?.(`[XMPP] Reading file:// URL: ${filePath}`);
-    const data = fs.readFileSync(filePath);
-    const ext = path.extname(filePath);
-    const contentType = mimeLookup(ext) || "application/octet-stream";
-    const filename = path.basename(filePath);
-    return { data, contentType, filename };
-  }
-  
-  // HTTP(S) fetch
-  return new Promise((resolve, reject) => {
-    const httpModule = urlObj.protocol === "https:" ? https : http;
-
-    httpModule.get(urlOrPath, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        // Follow redirect
-        fetchUrl(res.headers.location, log).then(resolve).catch(reject);
-        return;
-      }
-
-      if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        const contentType = res.headers["content-type"] || "application/octet-stream";
-        const filename = getFilenameFromUrl(urlOrPath);
-        resolve({ data: Buffer.concat(chunks), contentType, filename });
-      });
-      res.on("error", reject);
-    }).on("error", reject);
-  });
-}
-
-/**
- * Extract filename from URL
- */
-function getFilenameFromUrl(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    const pathname = urlObj.pathname;
-    const filename = pathname.split("/").pop() || "file";
-    return decodeURIComponent(filename);
-  } catch {
-    return "file";
-  }
-}
-
-/**
  * Send a media message via XMPP
  * If HTTP Upload is available, uploads the file and sends the URL
  * Otherwise, sends the URL as plain text
@@ -197,7 +137,7 @@ export async function sendXmppMedia(
   to: string,
   mediaUrl: string,
   caption?: string,
-  options: { log?: Logger; accountId?: string } = {}
+  options: { log?: Logger; accountId?: string; resolvedMedia?: ResolvedMedia } = {}
 ): Promise<SendResult> {
   const log = options.log;
   const accountId = options.accountId ?? "default";
@@ -211,7 +151,7 @@ export async function sendXmppMedia(
   }
 
   try {
-    const isMuc = config.mucs?.some((muc) => bareJid(muc) === bareJid(to));
+    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(to));
     const msgType = isMuc ? "groupchat" : "chat";
     const serverDomain = resolveServer(config);
 
@@ -231,9 +171,10 @@ export async function sendXmppMedia(
       log?.debug?.(`[XMPP] HTTP Upload service: ${uploadService}`);
 
       try {
-        // Fetch the media file
+        // Use pre-resolved media data or download from HTTP URL
         log?.debug?.(`[XMPP] Fetching: ${mediaUrl}`);
-        const { data, contentType, filename } = await fetchUrl(mediaUrl, log);
+        const mediaData = options.resolvedMedia ?? await downloadUrl(mediaUrl, log);
+        const { data, contentType, filename } = mediaData;
 
         log?.debug?.(`[XMPP] Fetched ${filename} (${data.length} bytes, ${contentType})`);
 
@@ -266,7 +207,57 @@ export async function sendXmppMedia(
     // For XMPP clients to display media inline (Conversations, Dino, etc.),
     // the body must contain ONLY the URL - no additional text.
     // If there's a caption, send it as a separate message first.
-    
+
+    // When OMEMO is enabled, encrypt all outbound messages including media URLs
+    if (isOmemoEnabled(accountId)) {
+      const encryptFn = isMuc
+        ? (text: string) => encryptMucOmemoMessage(accountId, bareJid(to), text, log)
+        : (text: string) => encryptOmemoMessage(accountId, bareJid(to), text, log);
+
+      try {
+        // Send encrypted caption first if present
+        if (caption && caption.trim()) {
+          const captionEnc = await encryptFn(caption);
+          if (captionEnc) {
+            const captionStanza = buildOmemoMessageStanza(to, captionEnc, msgType);
+            await client.send(captionStanza);
+          } else {
+            log?.warn?.(`[XMPP] OMEMO caption encryption returned empty`);
+          }
+        }
+
+        // Send encrypted URL
+        const urlEnc = await encryptFn(shareUrl);
+        if (urlEnc) {
+          const urlStanza = buildOmemoMessageStanza(to, urlEnc, msgType);
+          await client.send(urlStanza);
+          log?.info?.(`[XMPP] OMEMO encrypted media sent to ${to}`);
+          return { ok: true, messageId: urlStanza.attrs.id };
+        }
+
+        // Encryption returned null — send warning, not the actual content
+        log?.warn?.(`[XMPP] OMEMO encryption returned empty for media to ${to}, sending warning`);
+        const warnMsg = xml(
+          "message",
+          { to, type: msgType, id: `msg_${Date.now()}` },
+          xml("body", {}, "⚠️ Failed to encrypt media message (OMEMO encryption returned empty). Message not sent for security.")
+        );
+        await client.send(warnMsg);
+        return { ok: false, error: "OMEMO encryption failed for media (returned empty)" };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log?.error?.(`[XMPP] OMEMO encryption error for media to ${to}: ${errMsg}`);
+        const warnMsg = xml(
+          "message",
+          { to, type: msgType, id: `msg_${Date.now()}` },
+          xml("body", {}, `⚠️ Failed to encrypt media message: ${errMsg}. Message not sent for security.`)
+        );
+        await client.send(warnMsg);
+        return { ok: false, error: `OMEMO encryption failed for media: ${errMsg}` };
+      }
+    }
+
+    // OMEMO not enabled — send plaintext
     if (caption && caption.trim()) {
       log?.debug?.(`[XMPP] Sending caption as separate message: ${caption.slice(0, 50)}...`);
       const captionMessage = xml(

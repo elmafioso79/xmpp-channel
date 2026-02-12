@@ -133,7 +133,7 @@ gateway: {
 ### Plugin Manifest (`openclaw.plugin.json`)
 - `id` and `channel.id` must be `"xmpp"`
 - `configSchema` defines user-configurable options with JSON Schema
-- Required fields: `jid`, `password`; optional: `server`, `port`, `mucs`, `prosodyHttp`
+- Required fields: `jid`, `password`; optional: `server`, `port`, `groups`, `prosodyHttp`
 
 ### XMPP Client Usage
 ```typescript
@@ -151,7 +151,7 @@ const xmpp = client({
 ### Message Handling
 - **Inbound:** Listen on `xmpp.on('stanza', ...)`, filter for `stanza.is('message')`
 - **Outbound direct:** `xml('message', { to: jid, type: 'chat' }, xml('body', {}, text))`
-- **Outbound MUC:** Use `type: 'groupchat'` for multi-user chat rooms
+- **Outbound group:** Use `type: 'groupchat'` for group chat rooms
 - **Media:** Implement XEP-0363 HTTP File Upload via `fileUploadUrl` config
 
 ### JID Normalization
@@ -171,7 +171,7 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
   getStatus: async ({ cfg }) => ({ channel: "xmpp", configured: Boolean(cfg.channels?.xmpp?.jid) }),
   configure: async ({ cfg, prompter }) => {
     const jid = await prompter.text({ message: "XMPP JID" });
-    // ... prompt for password, allowFrom, MUCs
+    // ... prompt for password, allowFrom, groups
     return { cfg: mergedConfig, accountId };
   },
   dmPolicy: { label: "XMPP", channel: "xmpp", ... },
@@ -196,7 +196,7 @@ Contact and room listings:
 export const xmppDirectoryAdapter = {
   self: async ({ cfg, accountId }) => ({ kind: "user", id: jid, name: "Bot" }),
   listPeers: async (params) => allowFrom.map((jid) => ({ kind: "user", id: jid })),
-  listGroups: async (params) => mucs.map((muc) => ({ kind: "group", id: muc })),
+  listGroups: async (params) => groups.map((room) => ({ kind: "group", id: room })),
 };
 ```
 
@@ -237,7 +237,7 @@ npm test             # Run tests
 ## Development Phases
 
 **Phase 1: Basic XMPP** — Connection, auth, reconnect, direct messages ✅  
-**Phase 2: Groups & Adapters** — MUC, onboarding, pairing, security, actions, directory, heartbeat, status ✅  
+**Phase 2: Groups & Adapters** — Group chat, onboarding, pairing, security, actions, directory, heartbeat, status ✅  
 **Phase 3: Advanced** — XEP-0363 file upload, Prosody HTTP API, live directory queries
 
 ## Dependencies
@@ -264,7 +264,7 @@ Channel config lives under `channels.xmpp.accounts.<accountId>`:
           "server": "example.com",
           "port": 5222,
           "allowFrom": ["user1@example.com"],
-          "mucs": ["room@conference.example.com"],
+          "groups": ["room@conference.example.com"],
           "fileUploadUrl": "https://upload.example.com"
         }
       }

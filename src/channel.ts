@@ -187,9 +187,9 @@ export const xmppPlugin = {
   security: {
     resolveDmPolicy: ({ account }: { account: ResolvedXmppAccount }) => ({
       policy: account.config?.dmPolicy || "open",
-      allowFrom: account.config?.allowFrom || [],
+      allowFrom: account.config?.dmAllowlist || [],
       policyPath: "channels.xmpp.dmPolicy",
-      allowFromPath: "channels.xmpp.allowFrom",
+      allowFromPath: "channels.xmpp.dmAllowlist",
       approveHint: formatPairingApproveHint("xmpp"),
       normalizeEntry: (raw: string) => bareJid(raw.replace(/^(xmpp|jabber):/i, "")),
     }),
@@ -215,8 +215,8 @@ export const xmppPlugin = {
         ? (config.accounts?.[params.accountId] ?? config)
         : config;
       
-      // Get groups config (keyed by room JID or "*" for default)
-      const groupsConfig: Record<string, XmppGroupConfig> | undefined = accountConfig.groups;
+      // Get group settings (keyed by room JID or "*" for default)
+      const groupsConfig: Record<string, XmppGroupConfig> | undefined = accountConfig.groupSettings;
       
       if (!groupsConfig) return undefined;
       
@@ -403,9 +403,27 @@ export const xmppPlugin = {
       // If we have a media URL, use HTTP Upload (XEP-0363)
       if (mediaUrl) {
         typedLog?.info?.(`[XMPP] sendMedia: calling sendXmppMedia with mediaUrl`);
+        
+        // Resolve local files before calling sendXmppMedia (which only handles network)
+        let resolvedMedia: import("./outbound.js").ResolvedMedia | undefined;
+        try {
+          const url = new URL(mediaUrl);
+          if (url.protocol === "file:") {
+            const { readFileUrl } = await import("./file-read.js");
+            resolvedMedia = readFileUrl(mediaUrl, typedLog);
+          }
+        } catch {
+          // Not a valid URL — treat as local file path
+          const { readLocalFile } = await import("./file-read.js");
+          const result = readLocalFile(mediaUrl, typedLog);
+          if (!result) throw new Error(`File not found: ${mediaUrl}`);
+          resolvedMedia = result;
+        }
+        
         result = await sendXmppMedia(config, to, mediaUrl, text, { 
           log: typedLog, 
-          accountId: accountId ?? undefined 
+          accountId: accountId ?? undefined,
+          resolvedMedia,
         });
       } else if (text) {
         // Otherwise, just send text

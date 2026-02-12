@@ -14,7 +14,7 @@ Thank you for your interest in contributing to the XMPP Channel Plugin for OpenC
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/openclaw/xmpp-channel.git
+   git clone https://github.com/elmafioso79/xmpp-channel.git
    cd xmpp-channel
    ```
 
@@ -50,7 +50,7 @@ xmpp-channel/
 │   ├── directory.ts       # Contact/room directory
 │   ├── heartbeat.ts       # Heartbeat adapter
 │   ├── state.ts           # Global state maps and constants
-│   ├── rooms.ts           # MUC room management
+│   ├── rooms.ts           # Group room management
 │   ├── keepalive.ts       # XEP-0199 ping keepalive
 │   ├── reconnect.ts       # Exponential backoff reconnection
 │   ├── chat-state.ts      # XEP-0085 typing, XEP-0333 receipts
@@ -168,7 +168,7 @@ When implementing new XMPP Extension Protocols (XEPs):
 2. Enable required modules in prosody.cfg.lua:
    - `mod_http_upload` for file uploads
    - `mod_pep` for personal eventing
-   - `mod_muc` for group chats
+   - `mod_muc` for group chat rooms
 
 ### ejabberd
 

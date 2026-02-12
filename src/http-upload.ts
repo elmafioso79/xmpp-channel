@@ -395,6 +395,38 @@ export function parseOobData(stanza: Element): { url: string; description?: stri
   };
 }
 
+/**
+ * Download data from an HTTP(S) URL, following redirects.
+ */
+export function downloadUrl(url: string, log?: Logger): Promise<{ data: Buffer; contentType: string; filename: string }> {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const httpModule = urlObj.protocol === "https:" ? https : http;
+
+    httpModule.get(url, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        downloadUrl(res.headers.location, log).then(resolve).catch(reject);
+        return;
+      }
+
+      if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const contentType = res.headers["content-type"] || "application/octet-stream";
+        const pathname = urlObj.pathname;
+        const filename = decodeURIComponent(pathname.split("/").pop() || "file");
+        resolve({ data: Buffer.concat(chunks), contentType, filename });
+      });
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
 // Cache discovered upload services
 const uploadServiceCache = new Map<string, string>();
 

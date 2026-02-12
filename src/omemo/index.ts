@@ -8,14 +8,13 @@
 
 import { xml } from "@xmpp/client";
 import type { Element } from "@xmpp/client";
-import * as fs from "fs";
-import * as path from "path";
 import type { Logger } from "../types.js";
 import { toBase64, fromBase64, getElementText } from "../xml-utils.js";
 import { OmemoStore } from "./store.js";
 import { publishDeviceId, fetchDeviceList } from "./device.js";
 import { publishBundle, fetchBundle, buildBundleFromStore } from "./bundle.js";
 import { NS_OMEMO, NS_OMEMO_DEVICES, OMEMO_NAMESPACES, NS_OMEMO_LEGACY, NS_OMEMO_V2, type OmemoStoreData, type OmemoDevice } from "./types.js";
+import { loadOmemoStoreData, saveOmemoStoreData } from "./persistence.js";
 import {
   getDeviceList,
   handleDeviceListPepEvent,
@@ -74,70 +73,6 @@ const omemoStores = new Map<string, OmemoStore>();
 
 /** Accounts with OMEMO enabled */
 const omemoEnabled = new Set<string>();
-
-// =============================================================================
-// toBase64, fromBase64, getElementText imported from xml-utils.ts
-
-// =============================================================================
-// FILE-BASED PERSISTENCE
-// =============================================================================
-
-const OMEMO_STORE_FILENAME = "xmpp-omemo.json";
-
-interface OmemoFileStore {
-  accounts: Record<string, OmemoStoreData>;
-}
-
-function getOmemoStorePath(): string {
-  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
-  return path.join(homeDir, ".openclaw", "extensions", "xmpp", OMEMO_STORE_FILENAME);
-}
-
-function loadOmemoFileStore(log?: Logger): OmemoFileStore {
-  try {
-    const storePath = getOmemoStorePath();
-    if (fs.existsSync(storePath)) {
-      const data = fs.readFileSync(storePath, "utf-8");
-      return JSON.parse(data) as OmemoFileStore;
-    }
-  } catch (err) {
-    log?.warn?.(`[OMEMO] Failed to load persisted store: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return { accounts: {} };
-}
-
-function saveOmemoFileStore(store: OmemoFileStore, log?: Logger): void {
-  try {
-    const storePath = getOmemoStorePath();
-    const dir = path.dirname(storePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
-    log?.debug?.(`[OMEMO] Saved persisted store`);
-  } catch (err) {
-    log?.error?.(`[OMEMO] Failed to save persisted store: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function loadOmemoStoreData(accountId: string, log?: Logger): OmemoStoreData | null {
-  const storePath = getOmemoStorePath();
-  log?.debug?.(`[OMEMO] Loading store from: ${storePath}`);
-  const exists = fs.existsSync(storePath);
-  log?.debug?.(`[OMEMO] Store file exists: ${exists}`);
-  
-  const fileStore = loadOmemoFileStore(log);
-  const hasAccount = accountId in fileStore.accounts;
-  log?.debug?.(`[OMEMO] Account ${accountId} in store: ${hasAccount}, keys: ${Object.keys(fileStore.accounts).join(", ")}`);
-  
-  return fileStore.accounts[accountId] ?? null;
-}
-
-function saveOmemoStoreData(accountId: string, data: OmemoStoreData, log?: Logger): void {
-  const fileStore = loadOmemoFileStore(log);
-  fileStore.accounts[accountId] = data;
-  saveOmemoFileStore(fileStore, log);
-}
 
 // =============================================================================
 // INITIALIZATION

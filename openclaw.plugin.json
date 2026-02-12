@@ -2,7 +2,7 @@
   "id": "xmpp",
   "name": "XMPP Channel",
   "description": "XMPP/Jabber channel plugin for Prosody, ejabberd, and other XMPP servers",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "channels": ["xmpp"],
   "configSchema": {
     "type": "object",
@@ -30,9 +30,9 @@
         "type": "string",
         "description": "XMPP resource identifier"
       },
-      "mucNick": {
+      "nickname": {
         "type": "string",
-        "description": "Nickname in MUC rooms (defaults to JID local part)"
+        "description": "Nickname in group chats (defaults to JID local part)"
       },
       "name": {
         "type": "string",
@@ -58,17 +58,22 @@
       "allowFrom": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "Bot owner JIDs (always have direct chat access; also the allowlist when dmPolicy is 'allowlist')"
+        "description": "Bot owner JIDs (always have direct chat access, cannot be removed by guests)"
+      },
+      "dmAllowlist": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "JIDs allowed to direct-chat when dmPolicy is 'allowlist' (owners always have access regardless)"
       },
       "groupAllowFrom": {
         "type": "array",
         "items": { "type": "string" },
         "description": "Allowed sender JIDs in groups (falls back to allowFrom)"
       },
-      "mucs": {
+      "groups": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "MUC rooms to auto-join"
+        "description": "Group chat rooms to auto-join"
       },
       "actions": {
         "type": "object",
@@ -105,24 +110,25 @@
             "server": { "type": "string", "description": "XMPP server hostname" },
             "port": { "type": "number", "default": 5222, "description": "XMPP server port" },
             "resource": { "type": "string", "description": "XMPP resource identifier" },
-            "mucNick": { "type": "string", "description": "Nickname in MUC rooms" },
+            "nickname": { "type": "string", "description": "Nickname in group chats" },
             "name": { "type": "string", "description": "Account display name" },
             "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
             "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
             "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "Guest direct chat policy" },
             "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
             "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Bot owner JIDs (always have direct chat access)" },
+            "dmAllowlist": { "type": "array", "items": { "type": "string" }, "description": "DM allowlist JIDs (when dmPolicy is 'allowlist')" },
             "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
-            "mucs": { "type": "array", "items": { "type": "string" }, "description": "MUC rooms to join" },
+            "groups": { "type": "array", "items": { "type": "string" }, "description": "Group chat rooms to join" },
             "actions": { "type": "object", "description": "Action configuration" },
             "messagePrefix": { "type": "string", "description": "Inbound message prefix" },
             "heartbeatVisibility": { "type": "string", "enum": ["visible", "hidden"], "description": "Heartbeat visibility" },
-            "groups": { "type": "object", "description": "Per-group configuration" }
+            "groupSettings": { "type": "object", "description": "Per-group settings" }
           }
         },
         "description": "Multi-account configuration"
       },
-      "groups": {
+      "groupSettings": {
         "type": "object",
         "additionalProperties": {
           "type": "object",
@@ -151,7 +157,7 @@
             }
           }
         },
-        "description": "Per-group configuration (keyed by room JID)"
+        "description": "Per-group settings (keyed by room JID)"
       }
     }
   }

@@ -77,9 +77,14 @@ export async function handleInboundMessage(
       } else if (dmPolicy === "open") {
         log?.debug?.(`[XMPP] Direct chat allowed (dmPolicy: open)`);
       } else if (dmPolicy === "allowlist") {
-        // allowlist mode: only allowFrom JIDs (already checked above as owners)
-        log?.debug?.(`[XMPP] Direct chat blocked: guest ${senderBare} not in allowFrom`);
-        return;
+        // allowlist mode: check dmAllowlist (owners already passed above)
+        const dmAllowList = normalizeAllowFrom(config.dmAllowlist);
+        if (isSenderAllowed(dmAllowList, senderBare)) {
+          log?.debug?.(`[XMPP] Direct chat allowed (dmPolicy: allowlist, ${senderBare} in dmAllowlist)`);
+        } else {
+          log?.debug?.(`[XMPP] Direct chat blocked: guest ${senderBare} not in dmAllowlist`);
+          return;
+        }
       } else {
         // pairing or unknown policy - let OpenClaw core handle pairing flow
         log?.debug?.(`[XMPP] Direct chat: guest ${senderBare}, dmPolicy=${dmPolicy}`);
@@ -220,9 +225,29 @@ async function deliverReply(
       
       log?.debug?.(`[XMPP] Media ${i + 1}/${allMediaUrls.length}: ${mediaUrl.slice(0, 80)}`);
       
+      // Resolve local files before calling sendXmppMedia (which only handles network)
+      let resolvedMedia: import("./outbound.js").ResolvedMedia | undefined;
+      try {
+        const url = new URL(mediaUrl);
+        if (url.protocol === "file:") {
+          const { readFileUrl } = await import("./file-read.js");
+          resolvedMedia = readFileUrl(mediaUrl, log);
+        }
+      } catch {
+        // Not a valid URL — treat as local file path
+        const { readLocalFile } = await import("./file-read.js");
+        const result = readLocalFile(mediaUrl, log);
+        if (!result) {
+          log?.error?.(`[XMPP] File not found: ${mediaUrl}`);
+          continue;
+        }
+        resolvedMedia = result;
+      }
+      
       const result = await sendXmppMedia(config, replyTo, mediaUrl, caption, {
         log,
         accountId,
+        resolvedMedia,
       });
       
       if (!result.ok) {
@@ -248,10 +273,11 @@ async function deliverReply(
   log?.info?.(`[XMPP] Reply to ${replyTo}: ${textToSend.slice(0, 50)}...`);
 
   // Check if we should encrypt the reply
-  // Encrypt if: incoming was encrypted AND OMEMO enabled AND (DM OR OMEMO-capable MUC)
+  // Encrypt if: OMEMO enabled AND (DM OR OMEMO-capable MUC)
+  // When OMEMO is enabled, ALL outbound messages must be encrypted.
   const omemoEnabled = isOmemoEnabled(accountId);
-  const shouldEncryptDm = message.wasEncrypted && !message.isGroup && omemoEnabled;
-  const shouldEncryptMuc = message.wasEncrypted && message.isGroup && omemoEnabled && isRoomOmemoCapable(accountId, bareJid(replyTo));
+  const shouldEncryptDm = !message.isGroup && omemoEnabled;
+  const shouldEncryptMuc = message.isGroup && omemoEnabled && isRoomOmemoCapable(accountId, bareJid(replyTo));
   
   if (shouldEncryptDm) {
     // Encrypt with OMEMO for DMs
@@ -271,10 +297,27 @@ async function deliverReply(
         await sendChatState(accountId, replyTo, "active", log);
         return;
       } else {
-        log?.warn?.(`[XMPP] OMEMO encryption failed, falling back to plaintext`);
+        log?.warn?.(`[XMPP] OMEMO encryption failed for DM, sending warning instead of plaintext reply`);
+        const warningStanza = xml(
+          "message",
+          { to: replyTo, type: "chat", id: generateMessageId() },
+          xml("body", {}, "⚠️ Failed to encrypt reply (OMEMO encryption returned empty). Message not sent for security.")
+        );
+        await xmppClient.send(warningStanza);
+        await sendChatState(accountId, replyTo, "active", log);
+        return;
       }
     } catch (err) {
-      log?.error?.(`[XMPP] OMEMO encryption error: ${err instanceof Error ? err.message : String(err)}, falling back to plaintext`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log?.error?.(`[XMPP] OMEMO encryption error: ${errMsg}, sending warning instead of plaintext reply`);
+      const warningStanza = xml(
+        "message",
+        { to: replyTo, type: "chat", id: generateMessageId() },
+        xml("body", {}, `⚠️ Failed to encrypt reply: ${errMsg}. Message not sent for security.`)
+      );
+      await xmppClient.send(warningStanza);
+      await sendChatState(accountId, replyTo, "active", log);
+      return;
     }
   } else if (shouldEncryptMuc) {
     // Encrypt with OMEMO for MUC rooms
@@ -294,10 +337,27 @@ async function deliverReply(
         await sendChatState(accountId, replyTo, "active", log);
         return;
       } else {
-        log?.warn?.(`[XMPP] MUC OMEMO encryption failed, falling back to plaintext`);
+        log?.warn?.(`[XMPP] MUC OMEMO encryption failed, sending warning instead of plaintext reply`);
+        const warningStanza = xml(
+          "message",
+          { to: replyTo, type: "groupchat", id: generateMessageId() },
+          xml("body", {}, "⚠️ Failed to encrypt reply (OMEMO encryption returned empty). Message not sent for security.")
+        );
+        await xmppClient.send(warningStanza);
+        await sendChatState(accountId, replyTo, "active", log);
+        return;
       }
     } catch (err) {
-      log?.error?.(`[XMPP] MUC OMEMO encryption error: ${err instanceof Error ? err.message : String(err)}, falling back to plaintext`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log?.error?.(`[XMPP] MUC OMEMO encryption error: ${errMsg}, sending warning instead of plaintext reply`);
+      const warningStanza = xml(
+        "message",
+        { to: replyTo, type: "groupchat", id: generateMessageId() },
+        xml("body", {}, `⚠️ Failed to encrypt reply: ${errMsg}. Message not sent for security.`)
+      );
+      await xmppClient.send(warningStanza);
+      await sendChatState(accountId, replyTo, "active", log);
+      return;
     }
   }
 

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-02-11
+
+### Changed
+
+- **Renamed config fields** — Eliminated confusing "MUC" terminology from user-facing config
+  - `mucs` → `groups` (room JID list)
+  - `groups` → `groupSettings` (per-room config like tools, requireMention)
+  - `mucNick` → `nickname` (display name in group chats)
+- **Separated owner list from DM allowlist** — `allowFrom` is now strictly for bot owners (cannot be removed by the agent); new `dmAllowlist` field for JIDs allowed to direct-chat when `dmPolicy` is `"allowlist"`
+  - Prevents accidental owner lockout if a guest asks the agent to remove a JID
+  - `allowFrom` = bot owners (immutable, always have access)
+  - `dmAllowlist` = guest-level DM access list (managed separately)
+
 ## [0.3.1] - 2026-02-08
 
 ### Changed
@@ -30,18 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic device ID and key bundle publication via PEP
   - Automatic decryption of incoming OMEMO messages
   - Automatic encryption of outgoing messages when OMEMO is enabled
-  - MUC group encryption with per-occupant key distribution
+  - Group chat encryption with per-occupant key distribution
   - Always-trust policy (accepts any identity key without verification)
   - Persistent key storage across restarts via OpenClaw's key-value storage
   - Device list caching with PEP subscription for updates
-  - MUC occupant tracking for real JID discovery (non-anonymous rooms)
+  - Group room occupant tracking for real JID discovery (non-anonymous rooms)
   - Self-encryption support for multi-device scenarios
   - Configurable device label for OMEMO device list
 
 ### Fixed
 
-- Skip MUC self-echo messages before OMEMO decryption (prevents "decrypt on sending chain" errors)
-- Skip MUC history messages before OMEMO decryption (forward secrecy prevents decryption of old messages)
+- Skip group self-echo messages before OMEMO decryption (prevents "decrypt on sending chain" errors)
+- Skip group history messages before OMEMO decryption (forward secrecy prevents decryption of old messages)
 
 ### Technical Details
 
@@ -74,11 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parse reply references from inbound messages
   - Fallback support for older clients
 
-- **MUC Improvements**
+- **Group Chat Improvements**
   - Self-presence detection (status code 110) for reliable join confirmation
   - Auto-accept and join on invite with greeting message
   - Room persistence across restarts
-  - Per-room tool policies (`groups.<roomJid>.tools`)
+  - Per-room tool policies (`groupSettings.<roomJid>.tools`)
   - Per-room `requireMention` setting
   - Separate `groupAllowFrom` for group message filtering
 
@@ -91,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Modular Architecture** — Split 1200-line `monitor.ts` into focused modules:
   - `state.ts` — Global state maps and constants
-  - `rooms.ts` — MUC room management and persistence
+  - `rooms.ts` — Group room management and persistence
   - `keepalive.ts` — XEP-0199 ping management
   - `reconnect.ts` — Exponential backoff logic
   - `chat-state.ts` — Typing indicators and read receipts
@@ -104,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added proper TypeScript interfaces for `XmppToolPolicy` and `XmppGroupConfig`
 - Extracted magic numbers to named constants
 - Silenced harmless `recipient-unavailable` presence errors
-- Proper cleanup of pending MUC joins on account stop
+- Proper cleanup of pending room joins on account stop
 
 ## [0.1.0] - 2026-02-03
 
@@ -118,8 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Messaging**
   - Direct messages (1-on-1 chat)
-  - Multi-User Chat (MUC/XEP-0045) support
-  - Auto-join configured MUC rooms
+  - Multi-User Chat (XEP-0045) support
+  - Auto-join configured group rooms
   - Message filtering for self-messages and history
 
 - **Security & Access Control**
@@ -155,9 +168,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uses `@xmpp/client` v0.13.1
 - Zod schema validation for configuration
 - Comprehensive type definitions
-
-## [Unreleased]
-
-### Planned
 
 

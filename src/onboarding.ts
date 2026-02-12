@@ -156,7 +156,7 @@ async function promptXmppDmPolicy(
       "  - open (default): guests can message freely",
       "  - disabled: only owners may direct-chat",
       "  - pairing: guests get a pairing code; an owner must approve",
-      "  - allowlist: only allowFrom JIDs may direct-chat",
+      "  - allowlist: only JIDs in dmAllowlist may direct-chat (owners always have access)",
       "",
       `Docs: ${formatDocsLink("/xmpp", "xmpp")}`,
     ].join("\n"),
@@ -169,7 +169,7 @@ async function promptXmppDmPolicy(
       { value: "open", label: "Open (allow all)" },
       { value: "disabled", label: "Disabled (owners only)" },
       { value: "pairing", label: "Pairing (require owner approval)" },
-      { value: "allowlist", label: "Allowlist only (only allowFrom JIDs)" },
+      { value: "allowlist", label: "Allowlist (only dmAllowlist JIDs)" },
     ],
   });
 
@@ -177,35 +177,35 @@ async function promptXmppDmPolicy(
 }
 
 /**
- * Prompt for MUC rooms to join
+ * Prompt for group chat rooms to join
  */
-async function promptXmppMucs(
+async function promptXmppGroups(
   cfg: OpenClawConfig,
   prompter: WizardPrompter
 ): Promise<OpenClawConfig> {
-  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.mucs as string[] | undefined;
+  const existing = (cfg.channels?.xmpp as Record<string, unknown>)?.groups as string[] | undefined;
 
-  const wantsMucs = await prompter.confirm({
-    message: "Configure MUC (group chat) rooms?",
+  const wantsGroups = await prompter.confirm({
+    message: "Configure group chat rooms?",
     initialValue: (existing?.length ?? 0) > 0,
   });
 
-  if (!wantsMucs) {
+  if (!wantsGroups) {
     return cfg;
   }
 
-  const mucsRaw = await prompter.text({
-    message: "MUC room JIDs (comma-separated)",
+  const groupsRaw = await prompter.text({
+    message: "Group room JIDs (comma-separated)",
     placeholder: "room@conference.example.com",
     initialValue: existing?.join(", "),
   });
 
-  const mucs = mucsRaw
+  const groups = groupsRaw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  return mergeXmppConfig(cfg, { mucs: mucs.length > 0 ? mucs : undefined });
+  return mergeXmppConfig(cfg, { groups: groups.length > 0 ? groups : undefined });
 }
 
 /**
@@ -288,8 +288,8 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     // Prompt for bot owner JIDs
     next = await promptXmppOwners(next, prompter);
 
-    // Prompt for MUC rooms
-    next = await promptXmppMucs(next, prompter);
+    // Prompt for group chat rooms
+    next = await promptXmppGroups(next, prompter);
 
     await prompter.note(
       [
@@ -308,7 +308,7 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     label: "XMPP",
     channel,
     policyKey: "channels.xmpp.dmPolicy",
-    allowFromKey: "channels.xmpp.allowFrom",
+    allowFromKey: "channels.xmpp.dmAllowlist",
     getCurrent: (cfg) => (cfg.channels?.xmpp as Record<string, unknown>)?.dmPolicy as string ?? "open",
     setPolicy: (cfg, policy) => mergeXmppConfig(cfg, { dmPolicy: policy }),
     promptAllowFrom: async ({ cfg, prompter }) => promptXmppDmPolicy(cfg, prompter),

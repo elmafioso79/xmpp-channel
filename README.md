@@ -7,7 +7,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 ## Features
 
 - **Direct Messages** — One-on-one chat via XMPP
-- **Group Chat** — Multi-User Chat (MUC) with auto-join and invite handling
+- **Group Chat** — Group chat rooms with auto-join and invite handling
 - **Multi-Account** — Configure multiple XMPP accounts
 - **Owner Access** — `allowFrom` defines bot owners who always have direct chat access
 - **Guest Policies** — `dmPolicy` controls guest access: open, disabled, pairing, or allowlist
@@ -50,7 +50,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
          "port": 5222,
          "dmPolicy": "pairing",
          "allowFrom": ["user1@example.com", "user2@example.com"],
-         "mucs": ["room@conference.example.com"],
+         "groups": ["room@conference.example.com"],
          "actions": {
          "reactions": true
          }
@@ -74,16 +74,17 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 | `name` | string | - | Account display name |
 | `enabled` | boolean | `true` | Whether account is enabled |
 | `dmPolicy` | string | `open` | Guest direct chat policy: `disabled`, `open`, `pairing`, `allowlist` |
-| `allowFrom` | string[] | `[]` | Bot owner JIDs (always have direct chat access; also the allowlist) |
+| `allowFrom` | string[] | `[]` | Bot owner JIDs (always have direct chat access, cannot be removed by guests) |
+| `dmAllowlist` | string[] | `[]` | JIDs allowed to direct-chat when dmPolicy is `allowlist` |
 | `groupPolicy` | string | `open` | Group policy: `open`, `allowlist` |
-| `mucs` | string[] | `[]` | MUC rooms to auto-join |
-| `mucNick` | string | JID local | Nickname to use in MUC rooms |
+| `groups` | string[] | `[]` | Group chat rooms to auto-join |
+| `nickname` | string | JID local | Nickname to use in group chats |
 | `groupAllowFrom` | string[] | `allowFrom` | Allowed senders in groups (falls back to `allowFrom`) |
 | `actions.reactions` | boolean | `false` | Enable XEP-0444 reactions |
 | `messagePrefix` | string | - | Inbound message prefix |
 | `heartbeatVisibility` | string | - | Heartbeat visibility: `visible`, `hidden` |
-| `groups.<roomJid>.requireMention` | boolean | `false` | Only respond when mentioned in this room |
-| `groups.<roomJid>.tools` | object | - | Tool policy for this room (allow/deny lists) |
+| `groupSettings.<roomJid>.requireMention` | boolean | `false` | Only respond when mentioned in this room |
+| `groupSettings.<roomJid>.tools` | object | - | Tool policy for this room (allow/deny lists) |
 | `omemo.enabled` | boolean | `false` | Enable OMEMO encryption (XEP-0384) |
 | `omemo.deviceLabel` | string | - | Display label for this device in OMEMO device list |
 
@@ -97,7 +98,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
         "work": {
           "jid": "workbot@company.com",
           "password": "work-pass",
-          "mucs": ["team@conference.company.com"]
+          "groups": ["team@conference.company.com"]
         },
         "personal": {
           "jid": "mybot@xmpp.net",
@@ -115,7 +116,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 - **disabled** — Only owner JIDs (in `allowFrom`) can direct-chat the bot
 - **open** — Accept direct chats from any sender
 - **pairing** — Guests get a pairing code; approve via `openclaw pairing approve xmpp:<code>`
-- **allowlist** — Only JIDs in `allowFrom` may direct-chat (same as disabled)
+- **allowlist** — Only owner JIDs and JIDs in `dmAllowlist` may direct-chat; owners cannot be removed by the agent
 
 ## Actions
 
@@ -158,14 +159,14 @@ When OMEMO is enabled:
 - The bot automatically publishes its device ID and key bundle via PEP
 - Incoming encrypted messages are automatically decrypted
 - Outgoing messages are automatically encrypted for all recipient devices
-- MUC messages are encrypted for all room occupants (requires non-anonymous rooms)
+- Group chat messages are encrypted for all room occupants (requires non-anonymous rooms)
 - The bot uses **always-trust** policy (accepts any identity key without verification)
 - Keys are persisted across restarts via OpenClaw's key-value storage
 
 #### OMEMO Requirements
 
 - **Server:** Must support PEP (XEP-0163). Most modern servers (Prosody, ejabberd) support this.
-- **MUC Rooms:** Must be configured as "non-anonymous" for OMEMO to work. This allows the bot to discover real JIDs of occupants.
+- **Group Rooms:** Must be configured as "non-anonymous" for OMEMO to work. This allows the bot to discover real JIDs of occupants.
 - **Clients:** Use an OMEMO-capable client like Conversations or Gajim.
 
 #### OMEMO Technical Details
@@ -180,7 +181,7 @@ When OMEMO is enabled:
 | Issue | Cause | Solution |
 |-------|-------|----------|
 | Messages not encrypting | OMEMO not enabled | Add `"omemo": { "enabled": true }` to config |
-| Can't decrypt in MUC | Room is semi-anonymous | Configure room as "non-anonymous" in server |
+| Can't decrypt in group | Room is semi-anonymous | Configure room as "non-anonymous" in server |
 | Client doesn't see bot's device | Device not published | Restart openclaw; check PEP is enabled on server |
 | "No devices found" error | Can't fetch recipient's device list | Ensure recipient has OMEMO enabled; check PEP access |
 | Decryption fails after restart | Keys not persisted | Check OpenClaw data directory is writable |
@@ -229,7 +230,7 @@ src/
 ├── inbound.ts         # Inbound message routing to OpenClaw
 ├── outbound.ts        # Send messages to XMPP
 │
-├── rooms.ts           # MUC room management and persistence
+├── rooms.ts           # Group room management and persistence
 ├── keepalive.ts       # XEP-0199 ping keepalive
 ├── reconnect.ts       # Exponential backoff reconnection
 ├── chat-state.ts      # XEP-0085 typing, XEP-0333 receipts
@@ -259,7 +260,7 @@ src/
 ## Roadmap
 
 - [x] Phase 1: Basic XMPP connection, auth, direct messages
-- [x] Phase 2: MUC support, group message handling, onboarding
+- [x] Phase 2: Group chat support, group message handling, onboarding
 - [x] Adapters: config, security, groups, mentions, threading, directory, actions, heartbeat, status
 - [x] Phase 3: XEP-0163 PEP, XEP-0363 HTTP file upload
 - [x] Phase 4: XEP-0085 typing, XEP-0333 receipts, XEP-0198 stream management, XEP-0199 keepalive, XEP-0461 replies

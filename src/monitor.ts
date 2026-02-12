@@ -132,10 +132,10 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
   // Generate unique resource per session to prevent connection conflicts on restart
   const sessionResource = config.resource ?? `openclaw-${generateSessionId()}`;
   
-  // MUC nick is what users see in group chats
-  const mucNick = config.mucNick ?? username;
+  // Nickname is what users see in group chats
+  const nickname = config.nickname ?? username;
 
-  log?.info?.(`[${accountId}] Starting XMPP connection to ${server} (resource=${sessionResource}, mucNick=${mucNick})...`);
+  log?.info?.(`[${accountId}] Starting XMPP connection to ${server} (resource=${sessionResource}, nickname=${nickname})...`);
 
   // Mark as starting
   if (setStatus) {
@@ -182,13 +182,13 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
   }
 
   // Setup message stanza handler
-  setupMessageHandler(xmpp, accountId, mucNick, cfg, config, log, setStatus);
+  setupMessageHandler(xmpp, accountId, nickname, cfg, config, log, setStatus);
 
   // Setup presence handlers (subscriptions, MUC self-presence, errors)
   setupPresenceHandlers(xmpp, accountId, log);
 
   // Setup MUC invite handler
-  setupMucInviteHandler(xmpp, accountId, mucNick, log);
+  setupMucInviteHandler(xmpp, accountId, nickname, log);
 
   // Setup IQ handlers (XEP-0092 version, XEP-0202 time)
   setupIqHandlers(xmpp, accountId, log);
@@ -245,24 +245,24 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     }
 
     // Debug: log config for troubleshooting
-    log?.debug?.(`[${accountId}] Config debug: allowFrom=${JSON.stringify(config.allowFrom)} mucs=${JSON.stringify(config.mucs)} dmPolicy=${config.dmPolicy}`);
+    log?.debug?.(`[${accountId}] Config debug: allowFrom=${JSON.stringify(config.allowFrom)} groups=${JSON.stringify(config.groups)} dmPolicy=${config.dmPolicy}`);
 
-    // Join MUC rooms from config
-    if (config.mucs && config.mucs.length > 0) {
-      log?.info?.(`[${accountId}] Joining ${config.mucs.length} MUC rooms...`);
-      for (const muc of config.mucs) {
-        await joinMuc(xmpp, muc, mucNick, log, accountId, true);
+    // Join group chat rooms from config
+    if (config.groups && config.groups.length > 0) {
+      log?.info?.(`[${accountId}] Joining ${config.groups.length} group rooms...`);
+      for (const room of config.groups) {
+        await joinMuc(xmpp, room, nickname, log, accountId, true);
       }
     } else {
-      log?.debug?.(`[${accountId}] No MUC rooms configured`);
+      log?.debug?.(`[${accountId}] No group rooms configured`);
     }
     
     // Join persisted rooms (from previous invites)
     const persistedRooms = getPersistedRooms(accountId, log);
     for (const roomJid of persistedRooms) {
-      if (config.mucs?.includes(roomJid)) continue;
+      if (config.groups?.includes(roomJid)) continue;
       log?.info?.(`[${accountId}] Rejoining persisted room: ${roomJid}`);
-      await joinMuc(xmpp, roomJid, mucNick, log, accountId, true);
+      await joinMuc(xmpp, roomJid, nickname, log, accountId, true);
     }
   });
 
@@ -345,7 +345,7 @@ registerStartXmppConnection(startXmppConnection);
 function setupMessageHandler(
   xmpp: ReturnType<typeof client>,
   accountId: string,
-  mucNick: string,
+  nickname: string,
   cfg: unknown,
   config: XmppConfig,
   log?: Logger,
@@ -383,8 +383,8 @@ function setupMessageHandler(
     const isGroupchat = type === "groupchat";
     if (isGroupchat) {
       const senderNickFromFrom = from.split("/")[1];
-      if (senderNickFromFrom === mucNick) {
-        log?.debug?.(`[${accountId}] XMPP skipping self-message in MUC (nick=${senderNickFromFrom})`);
+      if (senderNickFromFrom === nickname) {
+        log?.debug?.(`[${accountId}] XMPP skipping self-message in group (nick=${senderNickFromFrom})`);
         return;
       }
     }

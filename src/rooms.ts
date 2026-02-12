@@ -7,6 +7,7 @@
 import { xml } from "@xmpp/client";
 import type { client } from "@xmpp/client";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { bareJid } from "./config-schema.js";
 import type { Logger } from "./types.js";
@@ -30,7 +31,7 @@ interface RoomsStore {
 }
 
 function getRoomsStorePath(): string {
-  const homeDir = process.env.USERPROFILE || process.env.HOME || "";
+  const homeDir = os.homedir();
   return path.join(homeDir, ".openclaw", "extensions", "xmpp", ROOMS_STORE_FILENAME);
 }
 
@@ -193,7 +194,7 @@ export async function handleMucInvite(
   xmpp: ReturnType<typeof client>,
   roomJid: string,
   inviterJid: string,
-  mucNick: string,
+  nickname: string,
   accountId: string,
   log?: Logger
 ): Promise<void> {
@@ -203,13 +204,13 @@ export async function handleMucInvite(
     goneRooms.delete(roomJid);
   }
   
-  log?.debug?.(`[${accountId}] Auto-joining ${roomJid} as ${mucNick}`);
+  log?.debug?.(`[${accountId}] Auto-joining ${roomJid} as ${nickname}`);
   
   try {
     // Send presence to join the room and wait for self-presence confirmation
     const joinPresence = xml(
       "presence",
-      { to: `${roomJid}/${mucNick}` },
+      { to: `${roomJid}/${nickname}` },
       xml("x", { xmlns: "http://jabber.org/protocol/muc" })
     );
     
@@ -255,7 +256,7 @@ export async function handleMucInvite(
     const greeting = xml(
       "message",
       { to: roomJid, type: "groupchat" },
-      xml("body", {}, `[${mucNick}] has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
+      xml("body", {}, `[${nickname}] has joined — thanks for the invite, ${inviterJid.split("@")[0]}!`)
     );
     await xmpp.send(greeting);
     log?.debug?.(`[${accountId}] Sent greeting to room ${roomJid}`);

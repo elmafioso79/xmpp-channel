@@ -55,24 +55,24 @@ export async function listXmppPeersFromConfig(params: {
 }
 
 /**
- * List configured MUC rooms
+ * List configured group chat rooms
  */
 export async function listXmppGroupsFromConfig(params: {
   cfg: OpenClawConfig;
   accountId?: string | null;
 }): Promise<ChannelDirectoryEntry[]> {
   const account = resolveXmppAccount(params);
-  const mucs = account.config?.mucs;
+  const groups = account.config?.groups;
 
-  if (!mucs || mucs.length === 0) {
+  if (!groups || groups.length === 0) {
     return [];
   }
 
-  return mucs.map((muc) => ({
+  return groups.map((room) => ({
     kind: "group" as const,
-    id: bareJid(muc),
-    name: bareJid(muc).split("@")[0] || muc,
-    raw: { roomJid: bareJid(muc) },
+    id: bareJid(room),
+    name: bareJid(room).split("@")[0] || room,
+    raw: { roomJid: bareJid(room) },
   }));
 }
 
@@ -111,7 +111,7 @@ export async function resolveXmppTargets(params: {
       continue;
     }
     
-    // Try to find in allowFrom or mucs based on kind
+    // Try to find in allowFrom or groups based on kind
     if (kind === "user") {
       const allowFrom = account.config?.allowFrom ?? [];
       const match = allowFrom.find((jid) => 
@@ -130,10 +130,10 @@ export async function resolveXmppTargets(params: {
         continue;
       }
     } else if (kind === "group") {
-      const mucs = account.config?.mucs ?? [];
-      const match = mucs.find((muc) =>
-        bareJid(muc).toLowerCase().includes(trimmed.toLowerCase()) ||
-        bareJid(muc).split("@")[0].toLowerCase() === trimmed.toLowerCase()
+      const groups = account.config?.groups ?? [];
+      const match = groups.find((room) =>
+        bareJid(room).toLowerCase().includes(trimmed.toLowerCase()) ||
+        bareJid(room).split("@")[0].toLowerCase() === trimmed.toLowerCase()
       );
       if (match) {
         results.push({
