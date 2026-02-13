@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-02-12
+
+### Fixed
+
+- **Reactions: put `<reactions>` inside OMEMO encrypted payload** — Previously the `<reactions>` element was sent as a plaintext sibling to `<encrypted>`, which most XMPP clients ignore. Now the reactions XML is encrypted as the payload content, matching how native clients send OMEMO-encrypted reactions.
+
 ## [0.3.7] - 2026-02-12
 
 ### Fixed

@@ -112,22 +112,24 @@ export async function handleXmppAction(params: {
 
     const reactionMsgId = `reaction_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // When OMEMO is active, wrap the reaction in an OMEMO-encrypted stanza.
-    // Clients with OMEMO enforcement (Conversations, Gajim) silently drop
-    // plaintext stanzas from contacts with established OMEMO sessions.
+    // When OMEMO is active, the reactions must be INSIDE the encrypted payload,
+    // not as a plaintext sibling. Clients decrypt the payload and extract the
+    // <reactions> element from inside.
     if (isOmemoEnabled(account.accountId)) {
-      // Encrypt a minimal payload (empty string) — the reaction data lives
-      // in the <reactions> sibling element, not inside the encrypted payload.
+      // Build the reactions element as XML string to encrypt as payload
+      const payloadContent = remove
+        ? `<reactions id="${messageId}" xmlns="urn:xmpp:reactions:0"/>`
+        : `<reactions id="${messageId}" xmlns="urn:xmpp:reactions:0"><reaction>${emoji || "👍"}</reaction></reactions>`;
+
       const encryptedElement = isMuc
-        ? await encryptMucOmemoMessage(account.accountId, bareJid(targetJid), "", undefined)
-        : await encryptOmemoMessage(account.accountId, bareJid(targetJid), "", undefined);
+        ? await encryptMucOmemoMessage(account.accountId, bareJid(targetJid), payloadContent, undefined)
+        : await encryptOmemoMessage(account.accountId, bareJid(targetJid), payloadContent, undefined);
 
       if (encryptedElement) {
         const message = xml(
           "message",
           { to: targetJid, type: msgType, id: reactionMsgId },
           encryptedElement,
-          reactionsEl,
           xml("encryption", {
             xmlns: "urn:xmpp:eme:0",
             namespace: NS_OMEMO,
@@ -136,7 +138,7 @@ export async function handleXmppAction(params: {
           xml("store", { xmlns: "urn:xmpp:hints" })
         );
 
-        console.log(`[XMPP:actions] Sending OMEMO-encrypted reaction: to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"}`);
+        console.log(`[XMPP:actions] Sending OMEMO-encrypted reaction (in payload): to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"}`);
         await client.send(message);
       } else {
         // Encryption failed — fall back to plaintext reaction
