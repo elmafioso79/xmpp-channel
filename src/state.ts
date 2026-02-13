@@ -67,6 +67,63 @@ export const reconnectStates = new Map<string, ReconnectState>();
 // Called when self-presence is received (status code 110)
 export const pendingMucJoins = new Map<string, PendingMucJoin>();
 
+// Track outbound messages: maps client-side ID to server-assigned stanza-id
+// Key: accountId + ":" + clientMessageId (our ID)
+// Value: serverMessageId (the ID the server assigned)
+// This is needed for reactions - we need to know the server ID, not our client ID
+export const sentMessageIds = new Map<string, string>();
+
+// Track most recent inbound message ID per conversation (fallback for reactions when AI passes wrong ID)
+// Key: accountId + ":" + bare JID of conversation
+// Value: the stanza-id of the most recent message from that JID
+export const recentInboundMessageIds = new Map<string, string>();
+
+// Message ID tracking timeout (5 minutes - messages older than this won't have reactions)
+export const SENT_MESSAGE_ID_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Record an inbound message ID for potential reaction fallback
+ * Call this when receiving a message so we can use it as fallback if AI passes wrong ID
+ */
+export function recordInboundMessageId(accountId: string, fromJid: string, stanzaId: string): void {
+  const key = `${accountId}:${fromJid}`;
+  recentInboundMessageIds.set(key, stanzaId);
+}
+
+/**
+ * Get the most recent inbound message ID for a conversation (fallback)
+ */
+export function getRecentInboundMessageId(accountId: string, fromJid: string): string | undefined {
+  const key = `${accountId}:${fromJid}`;
+  return recentInboundMessageIds.get(key);
+}
+
+/**
+ * Get the server-assigned message ID for a client-side message ID
+ * Returns the server ID if found, otherwise tries recent inbound message ID as fallback
+ * Otherwise returns the original client ID
+ */
+export function getServerMessageId(accountId: string, clientMessageId: string, conversationJid?: string): string {
+  // First try our sent message tracking
+  const serverId = sentMessageIds.get(`${accountId}:${clientMessageId}`);
+  if (serverId) {
+    return serverId;
+  }
+  
+  // If not found and we have a conversation JID, try the recent inbound message ID fallback
+  // This helps when the AI passes a wrong ID (e.g., generates a random UUID instead of using the stanza-id)
+  if (conversationJid) {
+    const recentInboundId = getRecentInboundMessageId(accountId, conversationJid);
+    if (recentInboundId) {
+      console.log(`[XMPP:state] getServerMessageId: AI passed wrong ID ${clientMessageId}, using recent inbound ${recentInboundId} as fallback`);
+      return recentInboundId;
+    }
+  }
+  
+  // Fall back to the client message ID (even though it's likely wrong)
+  return clientMessageId;
+}
+
 // =============================================================================
 // CLEANUP
 // =============================================================================

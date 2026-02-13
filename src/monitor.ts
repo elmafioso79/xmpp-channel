@@ -17,6 +17,7 @@ import {
   reconnectStates,
   RECONNECT_BASE_DELAY_MS,
   cleanupAccountState,
+  sentMessageIds,
 } from "./state.js";
 import { joinMuc, getPersistedRooms } from "./rooms.js";
 import { startKeepalive, stopKeepalive } from "./keepalive.js";
@@ -30,7 +31,7 @@ import {
 import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { setupPresenceHandlers, setupMucInviteHandler } from "./stanza-handlers.js";
 import { setupIqHandlers } from "./iq-handlers.js";
-import { handleInboundMessage } from "./inbound.js";
+import { handleInboundMessage, handleInboundReaction } from "./inbound.js";
 
 // OMEMO imports
 import {
@@ -380,7 +381,12 @@ function setupMessageHandler(
     // Early check for MUC self-messages (before OMEMO decryption to avoid pointless decrypt attempts)
     const from = stanza.attrs.from;
     const type = stanza.attrs.type || "chat";
-    const isGroupchat = type === "groupchat";
+    const isGroupchat = type === "groupchat";    
+    // Check if this is our own message (from our JID) - this is a carbon copy of our sent message
+    // The server assigns a stanza-id that clients use for reactions
+    const ourJid = config.jid;
+    const isOurOwnMessage = from && bareJid(from) === bareJid(ourJid);
+    
     if (isGroupchat) {
       const senderNickFromFrom = from.split("/")[1];
       if (senderNickFromFrom === nickname) {
@@ -396,6 +402,37 @@ function setupMessageHandler(
       return;
     }
 
+    // If this is our own message (carbon copy), capture the server-assigned stanza-id
+    // This is needed for reactions - users react to the server's ID of our sent messages
+    if (isOurOwnMessage) {
+      const stanzaIdEl = stanza.getChild("stanza-id", "urn:xmpp:sid:0");
+      const serverMsgId = stanzaIdEl?.attrs?.id;
+      const clientMsgId = stanza.attrs.id;
+      
+      if (serverMsgId && clientMsgId) {
+        // Store mapping: server-side ID -> for later lookup
+        // This helps us understand what users are reacting to
+        const mapKey = `${accountId}:sent:${serverMsgId}`;
+        sentMessageIds.set(mapKey, clientMsgId);
+        log?.debug?.(`[${accountId}] Stored sent message mapping: server=${serverMsgId} -> client=${clientMsgId}`);
+        
+        // Also store the reverse mapping: client ID -> server ID
+        const reverseKey = `${accountId}:${clientMsgId}`;
+        sentMessageIds.set(reverseKey, serverMsgId);
+        log?.debug?.(`[${accountId}] Stored reverse mapping: client=${clientMsgId} -> server=${serverMsgId}`);
+        
+        // Schedule cleanup after 5 minutes
+        setTimeout(() => {
+          sentMessageIds.delete(mapKey);
+          sentMessageIds.delete(reverseKey);
+        }, 5 * 60 * 1000);
+      }
+      
+      // Skip processing our own messages - they're just carbon copies
+      log?.debug?.(`[${accountId}] XMPP skipping our own message (carbon copy)`);
+      return;
+    }
+
     // Check for OMEMO encrypted message
     let body: string | null = null;
     let wasEncrypted = false;
@@ -405,6 +442,9 @@ function setupMessageHandler(
     const emeHint = stanza.getChild("encryption", "urn:xmpp:eme:0");
     const isOmemoStanza = hasOmemoEncryption || emeHint?.attrs?.name === "OMEMO";
     
+    // SCE (Stanza Content Encryption) namespace for parsing wrapped content
+    const NS_SCE = "urn:xmpp:sce:1";
+    
     if (isOmemoEnabled(accountId) && hasOmemoEncryption) {
       log?.debug?.(`[${accountId}] OMEMO encrypted message detected`);
       try {
@@ -412,6 +452,64 @@ function setupMessageHandler(
         if (body) {
           wasEncrypted = true;
           log?.debug?.(`[${accountId}] OMEMO decryption successful`);
+          
+          // XEP-0444 + XEP-0420: Check if decrypted payload contains SCE-wrapped reactions
+          // The decrypted payload may be an SCE envelope containing <reactions> inside <content>
+          // Format: <envelope xmlns="urn:xmpp:sce:1"><content><reactions>...</reactions></content></envelope>
+          try {
+            // Check if body is SCE envelope (starts with <envelope)
+            if (body.includes("<envelope") && body.includes("urn:xmpp:sce:1")) {
+              log?.debug?.(`[${accountId}] Detected SCE envelope in OMEMO payload`);
+              
+              // Parse the reactions from the SCE envelope using regex
+              // The structure is: <envelope ...><content><reactions ...>...</reactions></content></envelope>
+              const reactionsMatch = body.match(/<reactions\s+[^>]*id=["']([^"']+)["'][^>]*>.*?<\/reactions>/s);
+              if (reactionsMatch) {
+                // Extract the full reactions element
+                const reactionsXml = reactionsMatch[0];
+                const reactedMsgId = reactionsMatch[1];
+                
+                // Extract individual reactions
+                const emojiMatches = reactionsXml.match(/<reaction[^>]*>([^<]*)<\/reaction>/g) || [];
+                const emojis = emojiMatches.map(m => {
+                  const match = m.match(/<reaction[^>]*>([^<]*)<\/reaction>/);
+                  return match ? match[1] : "";
+                }).filter(Boolean);
+                
+                const senderBare = bareJid(from);
+                if (emojis.length > 0) {
+                  log?.info?.(`[${accountId}] XEP-0444 OMEMO-encrypted reaction from ${senderBare}: ${emojis.join(", ")} on message ${reactedMsgId}`);
+                } else {
+                  log?.info?.(`[${accountId}] XEP-0444 OMEMO-encrypted reaction removed by ${senderBare} on message ${reactedMsgId}`);
+                }
+                
+                // Determine if this is a groupchat or direct message
+                const roomJid = isGroupchat ? bareJid(from) : undefined;
+                const senderNick = isGroupchat ? from.split("/")[1] : undefined;
+                
+                // Route OMEMO-encrypted reaction to OpenClaw so the AI can see and process it
+                await handleInboundReaction({
+                  reactedMessageId: reactedMsgId || "",
+                  emojis,
+                  senderBare,
+                  senderFull: from,
+                  isGroup: isGroupchat,
+                  roomJid,
+                  senderNick,
+                  cfg,
+                  accountId,
+                  config,
+                  log,
+                  setStatus,
+                });
+                
+                // Reaction processed - don't continue with normal message handling
+                return;
+              }
+            }
+          } catch (sceErr) {
+            log?.warn?.(`[${accountId}] Failed to parse SCE envelope: ${sceErr}`);
+          }
         } else {
           log?.debug?.(`[${accountId}] OMEMO decryption returned null (message not for us or key transport)`);
         }
@@ -440,11 +538,37 @@ function setupMessageHandler(
       const reactionChildren = reactionsEl.getChildren("reaction");
       const emojis = reactionChildren.map((r) => r.text?.() ?? "").filter(Boolean);
       const senderBare = bareJid(from);
+      
+      // Determine if this is a groupchat or direct message
+      const roomJid = isGroupchat ? bareJid(from) : undefined;
+      const senderNick = isGroupchat ? from.split("/")[1] : undefined;
+      
       if (emojis.length > 0) {
         log?.info?.(`[${accountId}] XEP-0444 reaction from ${senderBare}: ${emojis.join(", ")} on message ${reactedMsgId}`);
       } else {
         log?.info?.(`[${accountId}] XEP-0444 reaction removed by ${senderBare} on message ${reactedMsgId}`);
       }
+      
+      log?.info?.(`[${accountId}] XEP-0444 Routing reaction to OpenClaw...`);
+      
+      // Route reaction to OpenClaw so the AI can see and process it
+      await handleInboundReaction({
+        reactedMessageId: reactedMsgId || "",
+        emojis,
+        senderBare,
+        senderFull: from,
+        isGroup: isGroupchat,
+        roomJid,
+        senderNick,
+        cfg,
+        accountId,
+        config,
+        log,
+        setStatus,
+      });
+      
+      log?.info?.(`[${accountId}] XEP-0444 Reaction routing completed`);
+      
       // Reactions don't have a body — skip normal message processing
       return;
     }
@@ -507,10 +631,18 @@ function setupMessageHandler(
       replyToId,
       replyToBody,
       // XEP-0359: Capture server-assigned stanza-id (preferred for reactions/references)
+      // Also check stanza's 'id' attribute which some clients (like Gajim) use directly
       stanzaId: (() => {
+        // First try XEP-0359 stanza-id element
         const stanzaIdEl = stanza.getChild("stanza-id", "urn:xmpp:sid:0");
-        return stanzaIdEl?.attrs?.id || undefined;
+        if (stanzaIdEl?.attrs?.id) {
+          return stanzaIdEl.attrs.id;
+        }
+        // Fall back to stanza's 'id' attribute (used by Gajim and others)
+        return stanza.attrs.id || undefined;
       })(),
+      // Raw stanza 'id' attribute (some clients like Gajim use this directly)
+      rawStanzaId: stanza.attrs.id,
       wasEncrypted,
       // For MUC, we need the actual sender JID for OMEMO encryption
       // This is extracted from the stanza's 'from' attribute before we modified senderJid

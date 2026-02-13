@@ -144,6 +144,8 @@ export interface XmppInboundMessage {
   replyToBody?: string;
   /** XEP-0359: Server-assigned stanza ID (preferred for reactions/references) */
   stanzaId?: string;
+  /** Raw stanza 'id' attribute (some clients like Gajim use this directly) */
+  rawStanzaId?: string;
   /** True if the incoming message was OMEMO encrypted */
   wasEncrypted?: boolean;
   /** Sender JID for OMEMO encryption (bare JID, needed for MUC) */

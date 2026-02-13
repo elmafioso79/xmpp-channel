@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-12
+
+### Fixed
+
+- **XEP-0444 Reactions: send as plaintext siblings** — Reactions are now sent as plaintext `<reactions>` elements as siblings to the OMEMO `<encrypted>` element, NOT inside the encrypted payload. This matches native client behavior (Gajim, Conversations) where reactions are sent unencrypted alongside an OMEMO message. The OMEMO payload is kept minimal (empty) to maintain session continuity while reactions appear as proper emoji reactions to recipients.
+
+## [0.3.9] - 2026-02-12
+
+### Fixed
+
+- **Reactions: wrap in SCE envelope per XEP-0420** — The OMEMO-encrypted reaction payload now properly wraps the `<reactions>` element in a Stanza Content Encryption (SCE) `<envelope><content>` structure. This matches the XEP-0420 profile that native XMPP clients expect. Without this wrapper, the raw `<reactions>` XML inside the encrypted payload wasn't being parsed correctly by clients like Gajim and Conversations.
+
 ## [0.3.8] - 2026-02-12
 
 ### Fixed

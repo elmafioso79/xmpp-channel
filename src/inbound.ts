@@ -11,7 +11,7 @@ import { getXmppRuntime } from "./runtime.js";
 import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
 import { sendXmppMedia } from "./outbound.js";
 import type { XmppConfig, XmppInboundMessage, Logger, ChannelAccountStatusPatch } from "./types.js";
-import { activeClients } from "./state.js";
+import { activeClients, recordInboundMessageId } from "./state.js";
 import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, isRoomOmemoCapable, buildOmemoMessageStanza } from "./omemo/index.js";
 
@@ -149,6 +149,15 @@ export async function handleInboundMessage(
     OriginatingTo: `xmpp:${message.isGroup ? message.roomJid : senderBare}`,
     CommandAuthorized: commandAuthorized,
   });
+
+  // Record the inbound message ID for potential reaction fallback
+  // This helps when AI passes wrong messageId - we can use the most recent message as fallback
+  // Prefer rawStanzaId (stanza's 'id' attr used by Gajim) > stanzaId (XEP-0359) > id
+  const inboundMessageId = message.rawStanzaId || message.stanzaId || message.id;
+  if (inboundMessageId && senderBare) {
+    recordInboundMessageId(accountId, senderBare, inboundMessageId);
+    console.log(`[XMPP:inbound] Recorded inbound message ID: ${inboundMessageId} (rawStanzaId=${message.rawStanzaId}, stanzaId=${message.stanzaId}, id=${message.id}) from ${senderBare}`);
+  }
 
   await rt.channel.session.recordInboundSession({
     storePath,
@@ -407,4 +416,166 @@ async function deliverReply(
   // Update lastOutboundAt and clear typing indicator
   setStatus?.({ accountId, lastOutboundAt: Date.now() });
   await sendChatState(accountId, replyTo, "active", log);
+}
+
+/**
+ * Handle inbound XMPP reaction (XEP-0444)
+ * Routes inbound reactions to OpenClaw so the AI can see and process them
+ */
+export async function handleInboundReaction(params: {
+  reactedMessageId: string;
+  emojis: string[];
+  senderBare: string;
+  senderFull: string;
+  isGroup: boolean;
+  roomJid?: string;
+  senderNick?: string;
+  cfg: unknown;
+  accountId: string;
+  config: XmppConfig;
+  log?: Logger;
+  setStatus?: (patch: ChannelAccountStatusPatch) => void;
+}): Promise<void> {
+  const {
+    reactedMessageId,
+    emojis,
+    senderBare,
+    senderFull,
+    isGroup,
+    roomJid,
+    senderNick,
+    cfg,
+    accountId,
+    config,
+    log,
+    setStatus,
+  } = params;
+
+  const rt = getXmppRuntime();
+
+  // Update last inbound timestamp
+  setStatus?.({
+    accountId,
+    lastInboundAt: Date.now(),
+  });
+
+  // For reactions, we need to check if the sender is allowed
+  const allowFromList = normalizeAllowFrom(config.allowFrom);
+  const isOwner = isSenderAllowed(allowFromList, senderBare);
+
+  if (isGroup) {
+    // For groups: check groupPolicy first
+    const groupPolicy = config.groupPolicy ?? "open";
+
+    if (groupPolicy === "open") {
+      log?.debug?.(`[XMPP] Group reaction allowed (groupPolicy: open)`);
+    } else {
+      const groupAllowList = normalizeAllowFrom(config.groupAllowFrom ?? config.allowFrom);
+      if (!isSenderAllowed(groupAllowList, senderBare)) {
+        log?.debug?.(`[XMPP] Group reaction blocked: ${senderBare} not in groupAllowFrom`);
+        return;
+      }
+    }
+  } else {
+    // For direct chats: owners (allowFrom) always have access
+    if (!isOwner) {
+      const dmPolicy = config.dmPolicy ?? "open";
+
+      if (dmPolicy === "disabled") {
+        log?.debug?.(`[XMPP] Direct chat reaction blocked (dmPolicy: disabled, guest ${senderBare})`);
+        return;
+      } else if (dmPolicy === "allowlist") {
+        const dmAllowList = normalizeAllowFrom(config.dmAllowlist);
+        if (!isSenderAllowed(dmAllowList, senderBare)) {
+          log?.debug?.(`[XMPP] Direct chat reaction blocked: guest ${senderBare} not in dmAllowlist`);
+          return;
+        }
+      }
+    }
+  }
+
+  // For groups, sender identity is the full occupant JID; for DMs, it's the bare JID
+  const senderIdentity = isGroup ? senderFull : senderBare;
+
+  log?.info?.(`[XMPP] Inbound reaction: from=${senderIdentity} emojis="${emojis.join(", ")}" onMessage=${reactedMessageId}`);
+
+  // Create a special body that the AI can understand as a reaction
+  // Format: "[reaction] 👋 on your message"
+  const reactionText = `[reaction] ${emojis.join(" ")} on your message "${reactedMessageId}"`;
+  
+  // DEBUG: Log what we're sending to the AI
+  log?.info?.(`[XMPP] Reaction text for AI: ${reactionText}`);
+  log?.info?.(`[XMPP] Providing ReactedMessageId=${reactedMessageId} for AI to use when reacting back`);
+
+  // Route to OpenClaw (same as regular messages)
+  const route = rt.channel.routing.resolveAgentRoute({
+    cfg,
+    channel: "xmpp",
+    accountId,
+    peer: {
+      kind: isGroup ? "group" : "dm",
+      id: isGroup ? roomJid! : senderBare,
+    },
+  });
+
+  const storePath = rt.channel.session.resolveStorePath(
+    (cfg as { session?: { store?: string } }).session?.store,
+    { agentId: route.agentId }
+  );
+
+  // Build the context with reaction info
+  const ctx = rt.channel.reply.finalizeInboundContext({
+    Body: reactionText,
+    RawBody: reactionText,
+    CommandBody: reactionText,
+    From: `xmpp:${senderIdentity}`,
+    To: `xmpp:${config.jid}`,
+    SessionKey: route.sessionKey,
+    AccountId: accountId,
+    ChatType: isGroup ? "group" : "direct",
+    ConversationLabel: isGroup ? roomJid : senderBare,
+    SenderName: senderNick || senderBare.split("@")[0],
+    SenderId: senderIdentity,
+    Provider: "xmpp",
+    Surface: "xmpp",
+    MessageSid: `reaction_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    OriginatingChannel: "xmpp" as const,
+    OriginatingTo: `xmpp:${isGroup ? roomJid : senderBare}`,
+    CommandAuthorized: isOwner || (config.dmPolicy ?? "open") === "open",
+    // Include reaction-specific metadata
+    ReactionEmojis: emojis,
+    ReactedMessageId: reactedMessageId,
+    IsReaction: true,
+  });
+
+  await rt.channel.session.recordInboundSession({
+    storePath,
+    sessionKey: ctx.SessionKey ?? route.sessionKey,
+    ctx,
+    updateLastRoute: isGroup ? undefined : {
+      sessionKey: route.mainSessionKey,
+      channel: "xmpp",
+      to: senderBare,
+      accountId,
+    },
+    onRecordError: (err: unknown) => {
+      log?.error?.(`[XMPP] Failed to record inbound reaction session: ${String(err)}`);
+    },
+  });
+
+  log?.info?.(`[XMPP] Reaction dispatching to AI...`);
+  
+  // Dispatch reaction to AI for processing
+  await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+    ctx,
+    cfg,
+    dispatcherOptions: {
+      responsePrefix: "",
+      deliver: async () => {
+        log?.debug?.(`[XMPP] Reaction deliver callback (no auto-reply for reactions)`);
+      },
+    },
+  });
+
+  log?.info?.(`[XMPP] Reaction dispatch completed`);
 }
