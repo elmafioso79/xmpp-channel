@@ -9,6 +9,12 @@ import { getActiveClient } from "./monitor.js";
 import { resolveXmppAccount } from "./accounts.js";
 import { bareJid } from "./config-schema.js";
 import { xml } from "@xmpp/client";
+import {
+  isOmemoEnabled,
+  encryptOmemoMessage,
+  encryptMucOmemoMessage,
+  NS_OMEMO,
+} from "./omemo/index.js";
 
 /**
  * Action gate - check if action is enabled in config
@@ -92,18 +98,11 @@ export async function handleXmppAction(params: {
 
   try {
     // XEP-0444: Message Reactions
-    // <message to="chat@example.com" type="chat" id="reaction-1">
-    //   <reactions id="original-message-id" xmlns="urn:xmpp:reactions:0">
-    //     <reaction>👍</reaction>
-    //   </reactions>
-    //   <store xmlns="urn:xmpp:hints"/>
-    // </message>
-
     // Determine message type: groupchat for MUC rooms, chat for DMs
     const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(targetJid));
     const msgType = isMuc ? "groupchat" : "chat";
 
-    const reactions = remove
+    const reactionsEl = remove
       ? xml("reactions", { id: messageId, xmlns: "urn:xmpp:reactions:0" })
       : xml(
           "reactions",
@@ -111,16 +110,57 @@ export async function handleXmppAction(params: {
           xml("reaction", {}, emoji || "👍")
         );
 
-    const message = xml(
-      "message",
-      { to: targetJid, type: msgType, id: `reaction_${Date.now()}` },
-      reactions,
-      xml("store", { xmlns: "urn:xmpp:hints" })
-    );
+    const reactionMsgId = `reaction_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    console.log(`[XMPP:actions] Sending reaction stanza: to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"} stanza=${message.toString().slice(0, 300)}`);
+    // When OMEMO is active, wrap the reaction in an OMEMO-encrypted stanza.
+    // Clients with OMEMO enforcement (Conversations, Gajim) silently drop
+    // plaintext stanzas from contacts with established OMEMO sessions.
+    if (isOmemoEnabled(account.accountId)) {
+      // Encrypt a minimal payload (empty string) — the reaction data lives
+      // in the <reactions> sibling element, not inside the encrypted payload.
+      const encryptedElement = isMuc
+        ? await encryptMucOmemoMessage(account.accountId, bareJid(targetJid), "", undefined)
+        : await encryptOmemoMessage(account.accountId, bareJid(targetJid), "", undefined);
 
-    await client.send(message);
+      if (encryptedElement) {
+        const message = xml(
+          "message",
+          { to: targetJid, type: msgType, id: reactionMsgId },
+          encryptedElement,
+          reactionsEl,
+          xml("encryption", {
+            xmlns: "urn:xmpp:eme:0",
+            namespace: NS_OMEMO,
+            name: "OMEMO",
+          }),
+          xml("store", { xmlns: "urn:xmpp:hints" })
+        );
+
+        console.log(`[XMPP:actions] Sending OMEMO-encrypted reaction: to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"}`);
+        await client.send(message);
+      } else {
+        // Encryption failed — fall back to plaintext reaction
+        console.log(`[XMPP:actions] OMEMO encryption failed for reaction, sending plaintext: to=${targetJid}`);
+        const message = xml(
+          "message",
+          { to: targetJid, type: msgType, id: reactionMsgId },
+          reactionsEl,
+          xml("store", { xmlns: "urn:xmpp:hints" })
+        );
+        await client.send(message);
+      }
+    } else {
+      // No OMEMO — send plaintext reaction
+      const message = xml(
+        "message",
+        { to: targetJid, type: msgType, id: reactionMsgId },
+        reactionsEl,
+        xml("store", { xmlns: "urn:xmpp:hints" })
+      );
+
+      console.log(`[XMPP:actions] Sending plaintext reaction: to=${targetJid} type=${msgType} refId=${messageId} emoji=${emoji || "👍"}`);
+      await client.send(message);
+    }
 
     if (remove) {
       return jsonResult({ ok: true, removed: true });

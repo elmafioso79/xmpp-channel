@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Reactions: strip `xmpp:` channel prefix from target JID** — The LLM passes JIDs with the `xmpp:` channel prefix (e.g., `xmpp:user@server`), which was leaking into the `to` attribute of the reaction stanza. The XMPP server silently dropped these stanzas because `xmpp:user@server` is not a valid JID. The prefix is now stripped in all code paths, not just the `toolContext` fallback.
+- **Reactions: strip `xmpp:` channel prefix from target JID** — The LLM passes JIDs with the `xmpp:` channel prefix (e.g., `xmpp:user@server`), which was leaking into the `to` attribute of the reaction stanza. The prefix is now stripped in all code paths.
+- **Reactions: OMEMO-encrypt reaction stanzas** — When OMEMO is active, Gajim and Conversations silently drop plaintext stanzas from contacts with established OMEMO sessions. Reaction stanzas are now wrapped in OMEMO encryption (empty payload with `<reactions>` sibling), matching what native XMPP clients expect.
 
 ## [0.3.6] - 2026-02-12
 
