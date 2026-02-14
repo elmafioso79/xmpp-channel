@@ -18,6 +18,19 @@ import {
 } from "./omemo/index.js";
 
 /**
+ * Resolve the full JID for a MUC message (includes nick)
+ * For groupchat, we need to include our nick in the 'to' attribute
+ */
+function resolveMucTarget(targetJid: string, isMuc: boolean, config: { nickname?: string }): string {
+  if (!isMuc) {
+    return targetJid;
+  }
+  // Use configured nickname, or extract from JID if not set
+  const nick = config.nickname || targetJid.split("@")[0].split("/")[0];
+  return `${targetJid}/${nick}`;
+}
+
+/**
  * Action gate - check if action is enabled in config
  */
 function createActionGate(
@@ -98,7 +111,7 @@ export async function handleXmppAction(params: {
   }
 
   // Check if targetJid is in groups list
-  const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(targetJid));
+  const isMuc = Boolean(config.groups?.some((room) => bareJid(room) === bareJid(targetJid)));
 
   // Determine message type: groupchat for MUC rooms, chat for DMs
   const msgType = isMuc ? "groupchat" : "chat";
@@ -152,9 +165,10 @@ export async function handleXmppAction(params: {
 
       if (encryptedElement) {
         // Send BOTH encrypted payload (keeps session active) AND plaintext reactions (for display)
+        const resolvedTarget = resolveMucTarget(targetJid, isMuc, config);
         const message = xml(
           "message",
-          { to: targetJid, type: msgType, id: reactionMsgId },
+          { to: resolvedTarget, type: msgType, id: reactionMsgId },
           encryptedElement,
           reactionsEl,  // Plaintext sibling - THIS is what clients display as emoji!
           xml("encryption", {
@@ -165,15 +179,16 @@ export async function handleXmppAction(params: {
           xml("store", { xmlns: "urn:xmpp:hints" })
         );
 
-        console.log(`[XMPP:actions] Sending OMEMO + plaintext reaction sibling: to=${targetJid} type=${msgType} refId=${serverMessageId} emoji=${emoji || "👍"}`);
+        console.log(`[XMPP:actions] Sending OMEMO + plaintext reaction sibling: to=${resolvedTarget} type=${msgType} refId=${serverMessageId} emoji=${emoji || "👍"}`);
         console.log(`[XMPP:actions] Full reaction stanza: ${message.toString()}`);
         await client.send(message);
       } else {
         // Encryption failed — fall back to plaintext reaction only
         console.log(`[XMPP:actions] OMEMO encryption failed for reaction, sending plaintext: to=${targetJid}`);
+        const resolvedTarget = resolveMucTarget(targetJid, isMuc, config);
         const message = xml(
           "message",
-          { to: targetJid, type: msgType, id: reactionMsgId },
+          { to: resolvedTarget, type: msgType, id: reactionMsgId },
           xml("body", {}, ""),  // Empty body - let the reactions element handle display
           reactionsEl,
           xml("store", { xmlns: "urn:xmpp:hints" })
@@ -185,15 +200,16 @@ export async function handleXmppAction(params: {
       // No OMEMO — send plaintext reaction
       // Use empty body - some clients (like Conversations) may show body text instead of emoji
       // The <reactions> element should be interpreted as emoji display per XEP-0444
+      const resolvedTarget = resolveMucTarget(targetJid, isMuc, config);
       const message = xml(
         "message",
-        { to: targetJid, type: msgType, id: reactionMsgId },
+        { to: resolvedTarget, type: msgType, id: reactionMsgId },
         xml("body", {}, ""),  // Empty body - let the reactions element handle display
         reactionsEl,
         xml("store", { xmlns: "urn:xmpp:hints" })
       );
 
-      console.log(`[XMPP:actions] Sending plaintext reaction: to=${targetJid} type=${msgType} refId=${serverMessageId} emoji=${emoji || "👍"}`);
+      console.log(`[XMPP:actions] Sending plaintext reaction: to=${resolvedTarget} type=${msgType} refId=${serverMessageId} emoji=${emoji || "👍"}`);
       console.log(`[XMPP:actions] Full reaction stanza: ${message.toString()}`);
       await client.send(message);
     }
