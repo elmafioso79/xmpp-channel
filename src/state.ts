@@ -92,10 +92,24 @@ export function recordInboundMessageId(accountId: string, fromJid: string, stanz
 
 /**
  * Get the most recent inbound message ID for a conversation (fallback)
+ * Tries multiple JID variations to handle different formats
  */
 export function getRecentInboundMessageId(accountId: string, fromJid: string): string | undefined {
-  const key = `${accountId}:${fromJid}`;
-  return recentInboundMessageIds.get(key);
+  // Try the exact key first
+  let key = `${accountId}:${fromJid}`;
+  let result = recentInboundMessageIds.get(key);
+  if (result) return result;
+
+  // For MUC JIDs like "room@conference.example.com/nick", also try just the bare JID
+  if (fromJid.includes("/")) {
+    const bareJidKey = `${accountId}:${fromJid.split("/")[0]}`;
+    result = recentInboundMessageIds.get(bareJidKey);
+    if (result) return result;
+  }
+
+  // For bare JIDs, also try with resource if applicable
+  // (less likely but try anyway)
+  return undefined;
 }
 
 /**
@@ -109,17 +123,28 @@ export function getServerMessageId(accountId: string, clientMessageId: string, c
   if (serverId) {
     return serverId;
   }
-  
+
   // If not found and we have a conversation JID, try the recent inbound message ID fallback
   // This helps when the AI passes a wrong ID (e.g., generates a random UUID instead of using the stanza-id)
   if (conversationJid) {
-    const recentInboundId = getRecentInboundMessageId(accountId, conversationJid);
+    // Try with the full JID as-is
+    let recentInboundId = getRecentInboundMessageId(accountId, conversationJid);
     if (recentInboundId) {
       console.log(`[XMPP:state] getServerMessageId: AI passed wrong ID ${clientMessageId}, using recent inbound ${recentInboundId} as fallback`);
       return recentInboundId;
     }
+
+    // Try with bare JID (without resource) for MUC messages
+    const bareJid = conversationJid.split("/")[0];
+    if (bareJid !== conversationJid) {
+      recentInboundId = getRecentInboundMessageId(accountId, bareJid);
+      if (recentInboundId) {
+        console.log(`[XMPP:state] getServerMessageId: AI passed wrong ID ${clientMessageId}, using recent inbound (bare JID) ${recentInboundId} as fallback`);
+        return recentInboundId;
+      }
+    }
   }
-  
+
   // Fall back to the client message ID (even though it's likely wrong)
   return clientMessageId;
 }

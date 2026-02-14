@@ -154,9 +154,18 @@ export async function handleInboundMessage(
   // This helps when AI passes wrong messageId - we can use the most recent message as fallback
   // Prefer rawStanzaId (stanza's 'id' attr used by Gajim) > stanzaId (XEP-0359) > id
   const inboundMessageId = message.rawStanzaId || message.stanzaId || message.id;
-  if (inboundMessageId && senderBare) {
-    recordInboundMessageId(accountId, senderBare, inboundMessageId);
-    console.log(`[XMPP:inbound] Recorded inbound message ID: ${inboundMessageId} (rawStanzaId=${message.rawStanzaId}, stanzaId=${message.stanzaId}, id=${message.id}) from ${senderBare}`);
+  if (inboundMessageId) {
+    // For DMs, record with senderBare
+    if (!message.isGroup && senderBare) {
+      recordInboundMessageId(accountId, senderBare, inboundMessageId);
+      console.log(`[XMPP:inbound] Recorded inbound message ID: ${inboundMessageId} (rawStanzaId=${message.rawStanzaId}, stanzaId=${message.stanzaId}, id=${message.id}) from ${senderBare}`);
+    }
+    // For MUC/group, also record with roomJid so fallback lookup can find it
+    // (AI will use roomJid as target when reacting to group messages)
+    if (message.isGroup && message.roomJid) {
+      recordInboundMessageId(accountId, message.roomJid, inboundMessageId);
+      console.log(`[XMPP:inbound] Recorded inbound message ID for group: ${inboundMessageId} from room ${message.roomJid}`);
+    }
   }
 
   await rt.channel.session.recordInboundSession({

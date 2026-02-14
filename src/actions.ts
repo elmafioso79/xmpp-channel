@@ -9,7 +9,7 @@ import { getActiveClient } from "./monitor.js";
 import { resolveXmppAccount } from "./accounts.js";
 import { bareJid } from "./config-schema.js";
 import { xml } from "@xmpp/client";
-import { getServerMessageId } from "./state.js";
+import { getServerMessageId, getRecentInboundMessageId } from "./state.js";
 import {
   isOmemoEnabled,
   encryptOmemoMessage,
@@ -225,7 +225,7 @@ export const xmppMessageActions = {
   }) => {
     const { action, params: actionParams, cfg, accountId, toolContext } = params;
 
-    const messageId = actionParams.messageId as string;
+    let messageId = actionParams.messageId as string | undefined;
     const emoji = actionParams.emoji as string | undefined;
     const remove = typeof actionParams.remove === "boolean" ? actionParams.remove : undefined;
 
@@ -241,6 +241,17 @@ export const xmppMessageActions = {
 
     if (!chatJid) {
       return jsonResult({ ok: false, error: "Target JID is required (pass chatJid, to, or use within a session context)" });
+    }
+
+    // If messageId is not provided, try to use the most recent inbound message ID from this conversation
+    if (!messageId) {
+      // Get the account ID to look up the recent message
+      const account = resolveXmppAccount({ cfg, accountId });
+      const recentId = getRecentInboundMessageId(account.accountId, bareJid(chatJid));
+      if (recentId) {
+        messageId = recentId;
+        console.log(`[XMPP:actions] No messageId provided, using recent inbound message ID: ${messageId}`);
+      }
     }
 
     if (!messageId) {

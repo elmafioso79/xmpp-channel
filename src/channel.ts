@@ -89,6 +89,13 @@ export const xmppPlugin = {
     polls: false,
   },
   
+  // Agent prompts for AI guidance
+  agentPrompt: {
+    messageToolHints: () => [
+      "- XMPP reactions: ALWAYS include messageId when using action=react (e.g., messageId=abc-123). Without messageId, the reaction will fail.",
+    ],
+  },
+  
   reload: { configPrefixes: ["channels.xmpp"] },
   
   // Onboarding wizard
