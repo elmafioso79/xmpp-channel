@@ -2,7 +2,7 @@ import type { OpenClawConfig, RuntimeEnv, WizardPrompter } from "openclaw/plugin
 import { formatDocsLink, DEFAULT_ACCOUNT_ID, normalizeAccountId, promptAccountId } from "openclaw/plugin-sdk";
 import type { ChannelOnboardingAdapter, ChannelOnboardingStatus, ChannelOnboardingResult } from "./types.js";
 import { listXmppAccountIds, resolveDefaultXmppAccountId, resolveXmppAccount } from "./accounts.js";
-import { bareJid } from "./config-schema.js";
+import { bareJid, isCredentialReference } from "./config-schema.js";
 
 const channel = "xmpp" as const;
 
@@ -57,12 +57,16 @@ async function promptXmppCredentials(
     },
   });
 
-  // Note: WizardPrompter doesn't have a password method, use text instead
-  const password = await prompter.text({
-    message: "XMPP password",
+  const passwordRef = await prompter.text({
+    message: "XMPP password reference (env:VAR or ${VAR})",
+    placeholder: "env:XMPP_PASSWORD",
+    initialValue: existing?.config?.password,
     validate: (value) => {
       const raw = String(value ?? "").trim();
-      if (!raw) return "Password is required";
+      if (!raw) return "Password reference is required";
+      if (!isCredentialReference(raw)) {
+        return "Use env:VAR or ${VAR}; plaintext passwords are not allowed";
+      }
       return undefined;
     },
   });
@@ -75,7 +79,7 @@ async function promptXmppCredentials(
 
   const updates: Record<string, unknown> = {
     jid: jid.trim(),
-    password: password.trim(),
+    password: passwordRef.trim(),
   };
 
   if (server?.trim()) {
@@ -219,7 +223,7 @@ export const xmppOnboardingAdapter: ChannelOnboardingAdapter = {
     const defaultAccountId = resolveDefaultXmppAccountId(cfg);
     const accountId = overrideId ? normalizeAccountId(overrideId) : defaultAccountId;
     const account = resolveXmppAccount({ cfg, accountId });
-    const configured = Boolean(account?.config?.jid && account?.config?.password);
+    const configured = Boolean(account?.config?.jid && account?.config?.password && isCredentialReference(account.config.password));
     const accountLabel = accountId === DEFAULT_ACCOUNT_ID ? "default" : accountId;
 
     return {

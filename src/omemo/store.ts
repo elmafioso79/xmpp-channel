@@ -86,6 +86,7 @@ export class OmemoStore {
   // Note: Signal library may store sessions as JSON strings OR ArrayBuffers depending on implementation
   private sessions = new Map<string, string | ArrayBuffer>();
   private identities = new Map<string, ArrayBuffer>();
+  private identityConflicts = new Set<string>();
 
   // Persistence callback
   private persistCallback?: () => Promise<void>;
@@ -390,11 +391,30 @@ export class OmemoStore {
    * Check if identity is trusted - ALWAYS TRUE (blind trust)
    */
   async isTrustedIdentity(
-    _identifier: string,
-    _identityKey: ArrayBuffer,
+    identifier: string,
+    identityKey: ArrayBuffer,
     _direction: number
   ): Promise<boolean> {
-    // ALWAYS TRUST - bot accepts any identity key
+    const existing = this.identities.get(identifier);
+    if (!existing) {
+      // Trust on first use (TOFU)
+      return true;
+    }
+
+    const existingArr = new Uint8Array(existing);
+    const newArr = new Uint8Array(identityKey);
+    if (existingArr.length !== newArr.length) {
+      this.identityConflicts.add(identifier);
+      this.log?.warn?.(`[OMEMO] Identity key changed for ${identifier} (length mismatch)`);
+      return false;
+    }
+    for (let i = 0; i < existingArr.length; i++) {
+      if (existingArr[i] !== newArr[i]) {
+        this.identityConflicts.add(identifier);
+        this.log?.warn?.(`[OMEMO] Identity key changed for ${identifier}`);
+        return false;
+      }
+    }
     return true;
   }
 
@@ -403,6 +423,24 @@ export class OmemoStore {
    */
   async saveIdentity(identifier: string, identityKey: ArrayBuffer): Promise<boolean> {
     const existing = this.identities.get(identifier);
+    if (existing) {
+      const existingArr = new Uint8Array(existing);
+      const newArr = new Uint8Array(identityKey);
+      let changed = existingArr.length !== newArr.length;
+      if (!changed) {
+        for (let i = 0; i < existingArr.length; i++) {
+          if (existingArr[i] !== newArr[i]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) {
+        this.identityConflicts.add(identifier);
+        this.log?.warn?.(`[OMEMO] Refusing to overwrite identity for ${identifier}; manual trust reset required`);
+        return true;
+      }
+    }
     this.identities.set(identifier, identityKey);
     await this.persist();
 

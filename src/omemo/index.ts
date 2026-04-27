@@ -73,6 +73,8 @@ const omemoStores = new Map<string, OmemoStore>();
 
 /** Accounts with OMEMO enabled */
 const omemoEnabled = new Set<string>();
+/** Per-account cap for devices encrypted per JID */
+const omemoMaxDevicesPerJid = new Map<string, number>();
 
 // =============================================================================
 // INITIALIZATION
@@ -90,7 +92,8 @@ export async function initializeOmemo(
   accountId: string,
   selfJid: string,
   deviceLabel?: string,
-  log?: Logger
+  log?: Logger,
+  options?: { maxDevicesPerJid?: number }
 ): Promise<OmemoStore> {
   try {
     // Create store
@@ -137,6 +140,7 @@ export async function initializeOmemo(
     // Track store
     omemoStores.set(accountId, store);
     omemoEnabled.add(accountId);
+    omemoMaxDevicesPerJid.set(accountId, Math.max(1, options?.maxDevicesPerJid ?? 10));
     
     log?.info?.(`[${accountId}] OMEMO initialized (device ${store.getDeviceId()})`);
     return store;
@@ -236,7 +240,12 @@ export async function shutdownOmemo(accountId: string, log?: Logger): Promise<vo
   
   omemoStores.delete(accountId);
   omemoEnabled.delete(accountId);
+  omemoMaxDevicesPerJid.delete(accountId);
   log?.debug?.(`[${accountId}] OMEMO shutdown`);
+}
+
+function getMaxDevicesPerJid(accountId: string): number {
+  return Math.max(1, omemoMaxDevicesPerJid.get(accountId) ?? 10);
 }
 
 // =============================================================================
@@ -612,14 +621,15 @@ export async function encryptOmemoMessage(
 
   try {
     // Fetch recipient's devices (uses cache if available)
-    const devices = await getDeviceList(accountId, recipientJid, false, log);
+    const maxDevicesPerJid = getMaxDevicesPerJid(accountId);
+    const devices = (await getDeviceList(accountId, recipientJid, false, log)).slice(0, maxDevicesPerJid);
     if (devices.length === 0) {
       log?.warn?.(`[${accountId}] No OMEMO devices for ${recipientJid}`);
       return null;
     }
 
     // Also include our own devices (except current one) for multi-device sync
-    const ownDevices = await getDeviceList(accountId, "", false, log);
+    const ownDevices = (await getDeviceList(accountId, "", false, log)).slice(0, maxDevicesPerJid);
     const ourDeviceId = store.getDeviceId();
     const otherOwnDevices = ownDevices.filter(d => d.id !== ourDeviceId);
 
@@ -773,10 +783,11 @@ export async function encryptMucOmemoMessage(
 
   try {
     // Collect all devices from all occupants
+    const maxDevicesPerJid = getMaxDevicesPerJid(accountId);
     const allDevices: Array<{ jid: string; deviceId: number }> = [];
     
     for (const jid of occupantJids) {
-      const devices = await getDeviceList(accountId, jid, false, log);
+      const devices = (await getDeviceList(accountId, jid, false, log)).slice(0, maxDevicesPerJid);
       for (const device of devices) {
         allDevices.push({ jid, deviceId: device.id });
       }
@@ -790,7 +801,7 @@ export async function encryptMucOmemoMessage(
     // Also include our own devices for multi-device sync
     // Unlike DMs, MUC messages are reflected back by the server, so we MUST
     // encrypt for our own device(s) to read the reflected message
-    const ownDevices = await getDeviceList(accountId, "", false, log);
+    const ownDevices = (await getDeviceList(accountId, "", false, log)).slice(0, maxDevicesPerJid);
     const ourDeviceId = store.getDeviceId();
     // For MUC, include ALL own devices including current one (for reflected messages)
     const ownDevicesToEncrypt = ownDevices;

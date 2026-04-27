@@ -25,6 +25,7 @@ import {
 // =============================================================================
 
 const ROOMS_STORE_FILENAME = "xmpp-rooms.json";
+const FILE_MODE_SECURE = 0o600;
 
 interface RoomsStore {
   rooms: Record<string, string[]>; // accountId -> room JIDs
@@ -39,6 +40,7 @@ function loadPersistedRooms(log?: Logger): RoomsStore {
   try {
     const storePath = getRoomsStorePath();
     if (fs.existsSync(storePath)) {
+      fs.chmodSync(storePath, FILE_MODE_SECURE);
       const data = fs.readFileSync(storePath, "utf-8");
       return JSON.parse(data) as RoomsStore;
     }
@@ -53,9 +55,12 @@ function savePersistedRooms(store: RoomsStore, log?: Logger): void {
     const storePath = getRoomsStorePath();
     const dir = path.dirname(storePath);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
+    const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(store, null, 2), { encoding: "utf-8", mode: FILE_MODE_SECURE });
+    fs.renameSync(tempPath, storePath);
+    fs.chmodSync(storePath, FILE_MODE_SECURE);
     log?.debug?.(`[XMPP] Saved persisted rooms`);
   } catch (err) {
     log?.error?.(`[XMPP] Failed to save persisted rooms: ${err instanceof Error ? err.message : String(err)}`);

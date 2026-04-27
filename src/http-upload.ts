@@ -18,6 +18,8 @@ import { iqId, extractErrorText, waitForIq } from "./xml-utils.js";
 import * as https from "https";
 import * as http from "http";
 import { URL } from "url";
+import { lookup } from "dns/promises";
+import * as net from "net";
 
 // XEP-0363 namespace
 export const NS_HTTP_UPLOAD = "urn:xmpp:http:upload:0";
@@ -400,35 +402,113 @@ export function parseOobData(stanza: Element): { url: string; description?: stri
  */
 export function downloadUrl(url: string, log?: Logger): Promise<{ data: Buffer; contentType: string; filename: string }> {
   return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const httpModule = urlObj.protocol === "https:" ? https : http;
+    const fetch = async (target: string, redirectCount: number): Promise<{ data: Buffer; contentType: string; filename: string }> => {
+      const urlObj = new URL(target);
+      await ensurePublicTarget(urlObj);
+      const httpModule = urlObj.protocol === "https:" ? https : http;
 
-    httpModule.get(url, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        downloadUrl(res.headers.location, log).then(resolve).catch(reject);
-        return;
-      }
+      return await new Promise((innerResolve, innerReject) => {
+        const req = httpModule.get(target, (res) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            if (redirectCount >= MAX_REDIRECTS) {
+              innerReject(new Error("Too many redirects while downloading media"));
+              return;
+            }
+            const redirectedUrl = new URL(res.headers.location, urlObj).toString();
+            fetch(redirectedUrl, redirectCount + 1).then(innerResolve).catch(innerReject);
+            return;
+          }
 
-      if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
-      }
+          if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+            innerReject(new Error(`HTTP ${res.statusCode}`));
+            return;
+          }
 
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        const contentType = res.headers["content-type"] || "application/octet-stream";
-        const pathname = urlObj.pathname;
-        const filename = decodeURIComponent(pathname.split("/").pop() || "file");
-        resolve({ data: Buffer.concat(chunks), contentType, filename });
+          const chunks: Buffer[] = [];
+          let total = 0;
+          res.on("data", (chunk: Buffer) => {
+            total += chunk.length;
+            if (total > MAX_DOWNLOAD_BYTES) {
+              req.destroy(new Error(`Download exceeds max size (${MAX_DOWNLOAD_BYTES} bytes)`));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          res.on("end", () => {
+            const contentType = res.headers["content-type"] || "application/octet-stream";
+            const pathname = urlObj.pathname;
+            const filename = decodeURIComponent(pathname.split("/").pop() || "file");
+            innerResolve({ data: Buffer.concat(chunks), contentType, filename });
+          });
+          res.on("error", innerReject);
+        });
+
+        req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+          req.destroy(new Error(`Media download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`));
+        });
+        req.on("error", innerReject);
       });
-      res.on("error", reject);
-    }).on("error", reject);
+    };
+
+    fetch(url, 0).then(resolve).catch(reject);
   });
 }
 
 // Cache discovered upload services
 const uploadServiceCache = new Map<string, string>();
+
+const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 15000;
+const MAX_REDIRECTS = 5;
+
+function isPrivateIpv4(ip: string): boolean {
+  const parts = ip.split(".").map((p) => Number.parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return true;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 0) return true;
+  return false;
+}
+
+function isPrivateIpv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  if (normalized === "::1") return true;
+  if (normalized.startsWith("fe80:")) return true; // link-local
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // unique local
+  if (normalized === "::") return true;
+  return false;
+}
+
+async function ensurePublicTarget(urlObj: URL): Promise<void> {
+  if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
+    throw new Error(`Unsupported protocol for media download: ${urlObj.protocol}`);
+  }
+  const host = urlObj.hostname.trim().toLowerCase();
+  if (!host) throw new Error("Missing hostname in media URL");
+  if (host === "localhost") throw new Error("Blocked private hostname: localhost");
+
+  if (net.isIP(host) === 4 && isPrivateIpv4(host)) {
+    throw new Error(`Blocked private IPv4 target: ${host}`);
+  }
+  if (net.isIP(host) === 6 && isPrivateIpv6(host)) {
+    throw new Error(`Blocked private IPv6 target: ${host}`);
+  }
+
+  const resolved = await lookup(host, { all: true, verbatim: true });
+  if (!resolved.length) throw new Error(`Failed to resolve hostname: ${host}`);
+  for (const addr of resolved) {
+    if (addr.family === 4 && isPrivateIpv4(addr.address)) {
+      throw new Error(`Blocked private IPv4 resolution for ${host}: ${addr.address}`);
+    }
+    if (addr.family === 6 && isPrivateIpv6(addr.address)) {
+      throw new Error(`Blocked private IPv6 resolution for ${host}: ${addr.address}`);
+    }
+  }
+}
 
 /**
  * Get or discover the HTTP Upload service for a domain

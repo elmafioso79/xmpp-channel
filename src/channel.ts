@@ -11,7 +11,7 @@ import type {
   ChannelAccountSnapshot,
   ThreadingToolContext,
 } from "./types.js";
-import { xmppChannelConfigSchema, bareJid } from "./config-schema.js";
+import { xmppChannelConfigSchema, bareJid, isCredentialReference } from "./config-schema.js";
 import { startXmppConnection } from "./monitor.js";
 import { sendXmppMessage, sendXmppMedia } from "./outbound.js";
 import { xmppOnboardingAdapter } from "./onboarding.js";
@@ -45,7 +45,7 @@ function getConfig(cfg: OpenClawConfig, accountId?: string): XmppConfig {
  */
 function isConfigured(cfg: OpenClawConfig, accountId?: string): boolean {
   const config = getConfig(cfg, accountId);
-  return Boolean(config.jid && config.password);
+  return Boolean(config.jid && config.password && isCredentialReference(config.password));
 }
 
 /**
@@ -171,14 +171,14 @@ export const xmppPlugin = {
     disabledReason: (): string => "disabled",
     
     isConfigured: (account: ResolvedXmppAccount): boolean =>
-      Boolean(account.config?.jid && account.config?.password),
+      Boolean(account.config?.jid && account.config?.password && isCredentialReference(account.config.password)),
     unconfiguredReason: (): string => "not configured",
     
     describeAccount: (account: ResolvedXmppAccount): XmppAccountDescriptor => ({
       accountId: account.accountId,
       name: account.config?.name || "XMPP",
       enabled: account.enabled,
-      configured: Boolean(account.config?.jid),
+      configured: Boolean(account.config?.jid && account.config?.password && isCredentialReference(account.config.password)),
       dmPolicy: account.config?.dmPolicy,
       allowFrom: account.config?.allowFrom,
     }),
@@ -417,12 +417,12 @@ export const xmppPlugin = {
           const url = new URL(mediaUrl);
           if (url.protocol === "file:") {
             const { readFileUrl } = await import("./file-read.js");
-            resolvedMedia = readFileUrl(mediaUrl, typedLog);
+            resolvedMedia = readFileUrl(mediaUrl, typedLog, { accountId: accountId ?? undefined, config });
           }
         } catch {
           // Not a valid URL — treat as local file path
           const { readLocalFile } = await import("./file-read.js");
-          const result = readLocalFile(mediaUrl, typedLog);
+          const result = readLocalFile(mediaUrl, typedLog, { accountId: accountId ?? undefined, config });
           if (!result) throw new Error(`File not found: ${mediaUrl}`);
           resolvedMedia = result;
         }
@@ -482,7 +482,7 @@ export const xmppPlugin = {
     },
     
     buildChannelSummary: async ({ account, snapshot }: { account: ResolvedXmppAccount; snapshot?: ChannelAccountSnapshot }) => ({
-      configured: Boolean(account.config?.jid && account.config?.password),
+      configured: Boolean(account.config?.jid && account.config?.password && isCredentialReference(account.config.password)),
       enabled: account.enabled,
       running: snapshot?.running ?? false,
       connected: snapshot?.connected ?? false,
@@ -496,7 +496,7 @@ export const xmppPlugin = {
       accountId: account.accountId,
       name: account.config?.name,
       enabled: account.enabled,
-      configured: Boolean(account.config?.jid && account.config?.password),
+      configured: Boolean(account.config?.jid && account.config?.password && isCredentialReference(account.config.password)),
       running: runtime?.running ?? false,
       connected: runtime?.connected ?? false,
       lastStartAt: runtime?.lastStartAt ?? null,

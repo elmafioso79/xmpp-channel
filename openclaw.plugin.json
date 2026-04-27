@@ -47,7 +47,7 @@
         "type": "string",
         "enum": ["disabled", "open", "pairing", "allowlist"],
         "default": "open",
-        "description": "Guest direct chat policy: disabled (owners only), open (allow all), pairing (require approval), allowlist (only allowFrom)"
+        "description": "Guest direct chat policy: disabled (owners only), open (allow all), pairing (require approval), allowlist (owners + dmAllowlist only)"
       },
       "groupPolicy": {
         "type": "string",
@@ -69,6 +69,16 @@
         "type": "array",
         "items": { "type": "string" },
         "description": "Allowed sender JIDs in groups (falls back to allowFrom)"
+      },
+      "inviteAllowFrom": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowed inviter JIDs for auto-joining MUC invites (defaults to allowFrom)"
+      },
+      "allowSaslPlain": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow SASL PLAIN authentication fallback"
       },
       "groups": {
         "type": "array",
@@ -105,6 +115,44 @@
         "default": true,
         "description": "Send read receipts (XEP-0333 chat markers) for incoming messages"
       },
+      "omemo": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable OMEMO encryption (XEP-0384)"
+          },
+          "deviceLabel": {
+            "type": "string",
+            "description": "Display label for this device in OMEMO device list"
+          },
+          "maxDevicesPerJid": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum devices per JID to encrypt for"
+          }
+        },
+        "description": "OMEMO encryption settings"
+      },
+      "media": {
+        "type": "object",
+        "properties": {
+          "allowFileUrls": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow file:// URLs for local media reads"
+          },
+          "allowedLocalPaths": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Allowlisted local roots for reading local media files"
+          }
+        },
+        "description": "Media/file read security settings"
+      },
       "accounts": {
         "type": "object",
         "additionalProperties": {
@@ -119,17 +167,36 @@
             "name": { "type": "string", "description": "Account display name" },
             "enabled": { "type": "boolean", "default": true, "description": "Whether enabled" },
             "configWrites": { "type": "boolean", "default": true, "description": "Allow agent config modifications" },
-            "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "Guest direct chat policy" },
+            "dmPolicy": { "type": "string", "enum": ["disabled", "open", "pairing", "allowlist"], "description": "Guest direct chat policy (allowlist uses owners + dmAllowlist)" },
             "groupPolicy": { "type": "string", "enum": ["open", "allowlist"], "description": "Group policy" },
             "allowFrom": { "type": "array", "items": { "type": "string" }, "description": "Bot owner JIDs (always have direct chat access)" },
             "dmAllowlist": { "type": "array", "items": { "type": "string" }, "description": "DM allowlist JIDs (when dmPolicy is 'allowlist')" },
             "groupAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed group senders" },
+            "inviteAllowFrom": { "type": "array", "items": { "type": "string" }, "description": "Allowed inviter JIDs for MUC auto-join" },
+            "allowSaslPlain": { "type": "boolean", "default": false, "description": "Allow SASL PLAIN authentication fallback" },
             "groups": { "type": "array", "items": { "type": "string" }, "description": "Group chat rooms to join" },
             "actions": { "type": "object", "description": "Action configuration" },
             "messagePrefix": { "type": "string", "description": "Inbound message prefix" },
             "heartbeatVisibility": { "type": "string", "enum": ["visible", "hidden"], "description": "Heartbeat visibility" },
             "groupSettings": { "type": "object", "description": "Per-group settings" },
-            "sendReadReceipts": { "type": "boolean", "default": true, "description": "Send read receipts (XEP-0333)" }
+            "sendReadReceipts": { "type": "boolean", "default": true, "description": "Send read receipts (XEP-0333)" },
+            "omemo": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false, "description": "Enable OMEMO encryption (XEP-0384)" },
+                "deviceLabel": { "type": "string", "description": "Display label for this device in OMEMO device list" },
+                "maxDevicesPerJid": { "type": "number", "default": 10, "minimum": 1, "maximum": 100, "description": "Maximum devices per JID to encrypt for" }
+              },
+              "description": "OMEMO encryption settings"
+            },
+            "media": {
+              "type": "object",
+              "properties": {
+                "allowFileUrls": { "type": "boolean", "default": false, "description": "Allow file:// URLs for local media reads" },
+                "allowedLocalPaths": { "type": "array", "items": { "type": "string" }, "description": "Allowlisted local roots for local media files" }
+              },
+              "description": "Media/file read security settings"
+            }
           }
         },
         "description": "Multi-account configuration"

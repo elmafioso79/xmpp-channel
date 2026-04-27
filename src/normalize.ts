@@ -3,6 +3,30 @@
  */
 
 import { bareJid } from "./config-schema.js";
+const JID_PREFIX_RE = /^(xmpp|jabber):/i;
+
+/**
+ * Normalize a bare JID for stable matching.
+ * Applies Unicode NFC normalization and lowercases the domain.
+ */
+export function normalizeXmppBareJid(jid: string): string {
+  const raw = String(jid ?? "").trim().replace(JID_PREFIX_RE, "");
+  if (!raw) {
+    throw new Error("Empty JID");
+  }
+  const bare = bareJid(raw).normalize("NFC");
+  const at = bare.indexOf("@");
+  if (at <= 0 || at >= bare.length - 1) {
+    throw new Error(`Invalid JID: ${jid}`);
+  }
+  const local = bare.slice(0, at).normalize("NFC");
+  const domain = bare.slice(at + 1).normalize("NFC").toLowerCase();
+  return `${local}@${domain}`;
+}
+
+function normalizeXmppBareJidForMatch(jid: string): string {
+  return normalizeXmppBareJid(jid).toLowerCase();
+}
 
 /**
  * Check if a string looks like an XMPP JID
@@ -57,16 +81,17 @@ export function isXmppMucJid(jid: string, mucDomains?: string[]): boolean {
 export function normalizeXmppTarget(raw: string | null | undefined): string | null {
   if (!raw) return null;
   
-  let target = raw.trim();
-  
-  // Strip xmpp: or jabber: prefix
-  target = target.replace(/^(xmpp|jabber):/i, "");
+  const target = raw.trim().replace(JID_PREFIX_RE, "");
   
   // Validate
   if (!looksLikeXmppJid(target)) return null;
   
-  // Return bare JID
-  return bareJid(target);
+  // Return canonical bare JID
+  try {
+    return normalizeXmppBareJid(target);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -114,10 +139,23 @@ export interface NormalizedAllowFrom {
  */
 export function normalizeAllowFrom(list?: string[]): NormalizedAllowFrom {
   if (!list || list.length === 0) {
-    return { entries: [], hasWildcard: true }; // Empty = allow all
+    return { entries: [], hasWildcard: false }; // Empty = allow none
   }
-  const entries = list.map((jid) => bareJid(jid).toLowerCase());
-  const hasWildcard = entries.includes("*");
+  const rawEntries = list
+    .map((jid) => String(jid ?? "").trim())
+    .filter(Boolean)
+    .map((jid) => jid.replace(JID_PREFIX_RE, ""));
+  const hasWildcard = rawEntries.includes("*");
+  const entries = rawEntries
+    .filter((entry) => entry !== "*")
+    .map((jid) => {
+      try {
+        return normalizeXmppBareJidForMatch(jid);
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
   return { entries, hasWildcard };
 }
 
@@ -125,7 +163,12 @@ export function normalizeAllowFrom(list?: string[]): NormalizedAllowFrom {
  * Check if sender is allowed based on normalized allowFrom
  */
 export function isSenderAllowed(allowFrom: NormalizedAllowFrom, senderJid: string): boolean {
-  if (allowFrom.hasWildcard || allowFrom.entries.length === 0) return true;
-  const normalized = bareJid(senderJid).toLowerCase();
-  return allowFrom.entries.includes(normalized);
+  if (allowFrom.hasWildcard) return true;
+  if (!senderJid.trim()) return false;
+  try {
+    const normalized = normalizeXmppBareJidForMatch(senderJid);
+    return allowFrom.entries.includes(normalized);
+  } catch {
+    return false;
+  }
 }

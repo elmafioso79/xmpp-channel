@@ -9,7 +9,8 @@ import { xml } from "@xmpp/client";
 import type { Element } from "@xmpp/client";
 import type { client } from "@xmpp/client";
 import { bareJid } from "./config-schema.js";
-import type { Logger } from "./types.js";
+import { normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
+import type { Logger, XmppConfig } from "./types.js";
 import { goneRooms, pendingMucJoins } from "./state.js";
 import { removePersistedRoom, handleMucInvite } from "./rooms.js";
 import { handleMucPresence } from "./omemo/muc-occupants.js";
@@ -20,8 +21,10 @@ import { handleMucPresence } from "./omemo/muc-occupants.js";
 export function setupPresenceHandlers(
   xmpp: ReturnType<typeof client>,
   accountId: string,
+  config: XmppConfig,
   log?: Logger
 ): void {
+  const ownerAllowList = normalizeAllowFrom(config.allowFrom);
   xmpp.on("stanza", async (stanza) => {
     if (!stanza.is("presence")) return;
     
@@ -57,17 +60,15 @@ export function setupPresenceHandlers(
     
     // Handle subscription requests - auto-approve
     if (type === "subscribe") {
-      log?.info?.(`[${accountId}] XMPP presence subscribe from ${fromBare} - auto-approving`);
-      
-      // Send subscribed (approve their request)
-      const subscribed = xml("presence", { to: fromBare, type: "subscribed" });
-      await xmpp.send(subscribed);
-      
-      // Also subscribe back to them (mutual subscription)
-      const subscribe = xml("presence", { to: fromBare, type: "subscribe" });
-      await xmpp.send(subscribe);
-      
-      log?.debug?.(`[${accountId}] XMPP sent subscribed + subscribe to ${fromBare}`);
+      if (isSenderAllowed(ownerAllowList, fromBare)) {
+        log?.info?.(`[${accountId}] XMPP presence subscribe from ${fromBare} - approving (owner allowlist)`);
+        const subscribed = xml("presence", { to: fromBare, type: "subscribed" });
+        await xmpp.send(subscribed);
+      } else {
+        log?.warn?.(`[${accountId}] XMPP presence subscribe from ${fromBare} - rejecting (not in allowFrom)`);
+        const unsubscribed = xml("presence", { to: fromBare, type: "unsubscribed" });
+        await xmpp.send(unsubscribed);
+      }
     }
     
     // Handle probe - respond with current presence
@@ -136,8 +137,10 @@ export function setupMucInviteHandler(
   xmpp: ReturnType<typeof client>,
   accountId: string,
   nickname: string,
+  config: XmppConfig,
   log?: Logger
 ): void {
+  const inviteAllowList = normalizeAllowFrom(config.inviteAllowFrom ?? config.allowFrom);
   xmpp.on("stanza", async (stanza) => {
     if (!stanza.is("message")) return;
     
@@ -155,6 +158,11 @@ export function setupMucInviteHandler(
     const inviterJid = bareJid(invite.attrs.from || "");
     const reason = invite.getChildText("reason") || "No reason provided";
     
+    if (!inviterJid || !isSenderAllowed(inviteAllowList, inviterJid)) {
+      log?.warn?.(`[${accountId}] Rejecting MUC invite to ${roomJid} from ${inviterJid || "unknown"} (not in invite allowlist)`);
+      return;
+    }
+
     log?.info?.(`[${accountId}] MUC invite: room=${roomJid} from=${inviterJid} reason="${reason}"`);
     
     await handleMucInvite(xmpp, roomJid, inviterJid, nickname, accountId, log);

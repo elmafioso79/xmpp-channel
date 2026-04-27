@@ -23,6 +23,17 @@ function generateMessageId(): string {
   return randomUUID();
 }
 
+function sanitizeReactionMessageId(rawId: string): string | null {
+  const sanitized = String(rawId ?? "")
+    .normalize("NFC")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim();
+  if (!sanitized || sanitized.length > 256) {
+    return null;
+  }
+  return sanitized;
+}
+
 /**
  * Handle inbound message - validate allowlist and route to OpenClaw
  */
@@ -44,10 +55,17 @@ export async function handleInboundMessage(
 
   // Check allowlist - different logic for groups vs direct chats
   const senderBare = bareJid(message.from);
-  
-  // First check if sender is in allowFrom (owners) - they always have access
+  const senderNick = message.senderNick;
+  const roomJid = message.roomJid;
+  const groupRealSenderJid = (message.isGroup && senderNick && roomJid)
+    ? getOccupantRealJid(accountId, roomJid, senderNick)
+    : null;
+
+  // Check owner access (for groups this is based on real sender JID)
   const allowFromList = normalizeAllowFrom(config.allowFrom);
-  const isOwner = isSenderAllowed(allowFromList, senderBare);
+  const ownerIdentity = message.isGroup ? groupRealSenderJid : senderBare;
+  const isOwner = ownerIdentity ? isSenderAllowed(allowFromList, ownerIdentity) : false;
+  let commandAuthorized = false;
   
   if (message.isGroup) {
     // For groups: check groupPolicy first
@@ -56,37 +74,34 @@ export async function handleInboundMessage(
     if (groupPolicy === "open") {
       // Open policy - allow all group messages
       log?.debug?.(`[XMPP] Group message allowed (groupPolicy: open)`);
+      commandAuthorized = true;
     } else {
       // Allowlist policy - check groupAllowFrom (falls back to allowFrom)
       // For group messages, we need to check the sender's REAL JID, not the room JID
       // The occupant JID is room@conference/nick, so we need to look up the real JID
       const groupAllowList = normalizeAllowFrom(config.groupAllowFrom ?? config.allowFrom);
-      
-      // Try to get the sender's real JID from MUC occupant tracking
-      const senderNick = message.senderNick;
-      const roomJid = message.roomJid;
-      const realSenderJid = (senderNick && roomJid) 
-        ? getOccupantRealJid(accountId, roomJid, senderNick) 
-        : null;
-      
-      if (realSenderJid) {
+      if (isOwner) {
+        log?.debug?.(`[XMPP] Group message allowed (owner ${ownerIdentity})`);
+        commandAuthorized = true;
+      } else if (groupRealSenderJid) {
         // Non-anonymous room - check real JID against allowlist
-        if (!isSenderAllowed(groupAllowList, realSenderJid)) {
-          log?.debug?.(`[XMPP] Group message blocked: ${realSenderJid} (real JID for ${senderNick}) not in groupAllowFrom`);
+        if (!isSenderAllowed(groupAllowList, groupRealSenderJid)) {
+          log?.debug?.(`[XMPP] Group message blocked: ${groupRealSenderJid} (real JID for ${senderNick}) not in groupAllowFrom`);
           return;
         }
-        log?.debug?.(`[XMPP] Group message allowed: ${realSenderJid} in groupAllowFrom`);
+        log?.debug?.(`[XMPP] Group message allowed: ${groupRealSenderJid} in groupAllowFrom`);
+        commandAuthorized = true;
       } else {
-        // Anonymous/semi-anonymous room - can't verify real JID
-        // Allow message since the room is already configured in 'groups'
-        // If admin wants stricter control, they should use a non-anonymous room
-        log?.debug?.(`[XMPP] Group message allowed (anonymous room, cannot verify real JID for ${senderNick})`);
+        // Anonymous/semi-anonymous room - cannot verify sender under allowlist policy
+        log?.debug?.(`[XMPP] Group message blocked: cannot verify real JID for ${senderNick} in allowlist mode`);
+        return;
       }
     }
   } else {
     // For direct chats: owners (allowFrom) always have access
     if (isOwner) {
       log?.debug?.(`[XMPP] Direct chat allowed (owner ${senderBare} is in allowFrom)`);
+      commandAuthorized = true;
     } else {
       // Non-owners (guests): check dmPolicy
       const dmPolicy = config.dmPolicy ?? "open";
@@ -96,11 +111,13 @@ export async function handleInboundMessage(
         return;
       } else if (dmPolicy === "open") {
         log?.debug?.(`[XMPP] Direct chat allowed (dmPolicy: open)`);
+        commandAuthorized = true;
       } else if (dmPolicy === "allowlist") {
         // allowlist mode: check dmAllowlist (owners already passed above)
         const dmAllowList = normalizeAllowFrom(config.dmAllowlist);
         if (isSenderAllowed(dmAllowList, senderBare)) {
           log?.debug?.(`[XMPP] Direct chat allowed (dmPolicy: allowlist, ${senderBare} in dmAllowlist)`);
+          commandAuthorized = true;
         } else {
           log?.debug?.(`[XMPP] Direct chat blocked: guest ${senderBare} not in dmAllowlist`);
           return;
@@ -130,10 +147,6 @@ export async function handleInboundMessage(
     log?.debug?.(`[XMPP] Read receipts disabled, skipping for message ${message.id}`);
   }
 
-  // Command authorization: owners (allowFrom) always authorized,
-  // guests authorized only when dmPolicy allows them through
-  const commandAuthorized = isOwner || (config.dmPolicy ?? "open") === "open";
-  
   // Route to OpenClaw
   const route = rt.channel.routing.resolveAgentRoute({
     cfg,
@@ -287,12 +300,12 @@ async function deliverReply(
         const url = new URL(mediaUrl);
         if (url.protocol === "file:") {
           const { readFileUrl } = await import("./file-read.js");
-          resolvedMedia = readFileUrl(mediaUrl, log);
+          resolvedMedia = readFileUrl(mediaUrl, log, { accountId, config });
         }
       } catch {
         // Not a valid URL — treat as local file path
         const { readLocalFile } = await import("./file-read.js");
-        const result = readLocalFile(mediaUrl, log);
+        const result = readLocalFile(mediaUrl, log, { accountId, config });
         if (!result) {
           log?.error?.(`[XMPP] File not found: ${mediaUrl}`);
           continue;
@@ -489,7 +502,12 @@ export async function handleInboundReaction(params: {
 
   // For reactions, we need to check if the sender is allowed
   const allowFromList = normalizeAllowFrom(config.allowFrom);
-  const isOwner = isSenderAllowed(allowFromList, senderBare);
+  const groupRealSenderJid = (isGroup && senderNick && roomJid)
+    ? getOccupantRealJid(accountId, roomJid, senderNick)
+    : null;
+  const ownerIdentity = isGroup ? groupRealSenderJid : senderBare;
+  const isOwner = ownerIdentity ? isSenderAllowed(allowFromList, ownerIdentity) : false;
+  let commandAuthorized = false;
 
   if (isGroup) {
     // For groups: check groupPolicy first
@@ -497,40 +515,45 @@ export async function handleInboundReaction(params: {
 
     if (groupPolicy === "open") {
       log?.debug?.(`[XMPP] Group reaction allowed (groupPolicy: open)`);
+      commandAuthorized = true;
     } else {
       const groupAllowList = normalizeAllowFrom(config.groupAllowFrom ?? config.allowFrom);
-      
-      // Try to get the sender's real JID from MUC occupant tracking
-      const realSenderJid = (senderNick && roomJid) 
-        ? getOccupantRealJid(accountId, roomJid, senderNick) 
-        : null;
-      
-      if (realSenderJid) {
+      if (isOwner) {
+        log?.debug?.(`[XMPP] Group reaction allowed (owner ${ownerIdentity})`);
+        commandAuthorized = true;
+      } else if (groupRealSenderJid) {
         // Non-anonymous room - check real JID against allowlist
-        if (!isSenderAllowed(groupAllowList, realSenderJid)) {
-          log?.debug?.(`[XMPP] Group reaction blocked: ${realSenderJid} (real JID for ${senderNick}) not in groupAllowFrom`);
+        if (!isSenderAllowed(groupAllowList, groupRealSenderJid)) {
+          log?.debug?.(`[XMPP] Group reaction blocked: ${groupRealSenderJid} (real JID for ${senderNick}) not in groupAllowFrom`);
           return;
         }
-        log?.debug?.(`[XMPP] Group reaction allowed: ${realSenderJid} in groupAllowFrom`);
+        log?.debug?.(`[XMPP] Group reaction allowed: ${groupRealSenderJid} in groupAllowFrom`);
+        commandAuthorized = true;
       } else {
-        // Anonymous/semi-anonymous room - can't verify real JID
-        log?.debug?.(`[XMPP] Group reaction allowed (anonymous room, cannot verify real JID for ${senderNick})`);
+        // Anonymous/semi-anonymous room - cannot verify sender under allowlist policy
+        log?.debug?.(`[XMPP] Group reaction blocked: cannot verify real JID for ${senderNick} in allowlist mode`);
+        return;
       }
     }
   } else {
     // For direct chats: owners (allowFrom) always have access
-    if (!isOwner) {
+    if (isOwner) {
+      commandAuthorized = true;
+    } else {
       const dmPolicy = config.dmPolicy ?? "open";
 
       if (dmPolicy === "disabled") {
         log?.debug?.(`[XMPP] Direct chat reaction blocked (dmPolicy: disabled, guest ${senderBare})`);
         return;
+      } else if (dmPolicy === "open") {
+        commandAuthorized = true;
       } else if (dmPolicy === "allowlist") {
         const dmAllowList = normalizeAllowFrom(config.dmAllowlist);
         if (!isSenderAllowed(dmAllowList, senderBare)) {
           log?.debug?.(`[XMPP] Direct chat reaction blocked: guest ${senderBare} not in dmAllowlist`);
           return;
         }
+        commandAuthorized = true;
       }
     }
   }
@@ -542,11 +565,16 @@ export async function handleInboundReaction(params: {
 
   // Create a special body that the AI can understand as a reaction
   // Format: "[reaction] 👋 on your message"
-  const reactionText = `[reaction] ${emojis.join(" ")} on your message "${reactedMessageId}"`;
+  const safeReactedMessageId = sanitizeReactionMessageId(reactedMessageId);
+  if (!safeReactedMessageId) {
+    log?.warn?.(`[XMPP] Ignoring reaction from ${senderIdentity} with invalid reactedMessageId`);
+    return;
+  }
+  const reactionText = `[reaction] ${emojis.join(" ")} on your message \"${safeReactedMessageId}\"`;
   
   // DEBUG: Log what we're sending to the AI
   log?.info?.(`[XMPP] Reaction text for AI: ${reactionText}`);
-  log?.info?.(`[XMPP] Providing ReactedMessageId=${reactedMessageId} for AI to use when reacting back`);
+  log?.info?.(`[XMPP] Providing ReactedMessageId=${safeReactedMessageId} for AI to use when reacting back`);
 
   // Route to OpenClaw (same as regular messages)
   const route = rt.channel.routing.resolveAgentRoute({
@@ -582,10 +610,10 @@ export async function handleInboundReaction(params: {
     MessageSid: `reaction_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     OriginatingChannel: "xmpp" as const,
     OriginatingTo: `xmpp:${isGroup ? roomJid : senderBare}`,
-    CommandAuthorized: isOwner || (config.dmPolicy ?? "open") === "open",
+    CommandAuthorized: commandAuthorized,
     // Include reaction-specific metadata
     ReactionEmojis: emojis,
-    ReactedMessageId: reactedMessageId,
+    ReactedMessageId: safeReactedMessageId,
     IsReaction: true,
   });
 

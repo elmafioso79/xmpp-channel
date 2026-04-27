@@ -12,6 +12,16 @@ export const XmppActionSchema = z.object({
 });
 
 /**
+ * Media security configuration schema
+ */
+export const XmppMediaSecurityConfigSchema = z.object({
+  /** Allow reading file:// URLs */
+  allowFileUrls: z.boolean().optional().default(false).describe("Allow file:// URLs for local media reads"),
+  /** Allowlisted local paths for media reads */
+  allowedLocalPaths: z.array(z.string()).optional().describe("Allowlisted local roots for reading media files"),
+});
+
+/**
  * Tool policy schema for group tool access control
  */
 export const ToolPolicySchema = z.object({
@@ -43,6 +53,8 @@ export const XmppOmemoConfigSchema = z.object({
   enabled: z.boolean().optional().default(false).describe("Enable OMEMO encryption (XEP-0384)"),
   /** Device label for this bot instance */
   deviceLabel: z.string().optional().describe("Display label for this device in OMEMO device list"),
+  /** Limit number of devices encrypted per JID */
+  maxDevicesPerJid: z.number().int().min(1).max(100).optional().default(10).describe("Maximum devices per JID to encrypt for"),
 });
 
 /**
@@ -87,6 +99,11 @@ export const XmppAccountSchema = z.object({
 
   /** Allowed sender JIDs for groups */
   groupAllowFrom: z.array(z.string()).optional().describe("Allowed sender JIDs for groups (defaults to allowFrom, use * for all)"),
+  /** Allowed inviter JIDs for MUC auto-join */
+  inviteAllowFrom: z.array(z.string()).optional().describe("Allowed inviter JIDs for auto-joining MUC invites (defaults to allowFrom)"),
+
+  /** Allow SASL PLAIN fallback */
+  allowSaslPlain: z.boolean().optional().default(false).describe("Allow SASL PLAIN authentication fallback"),
 
   /** Group chat rooms to join */
   groups: z.array(z.string()).optional().describe("Group chat rooms to join on startup"),
@@ -108,6 +125,9 @@ export const XmppAccountSchema = z.object({
 
   /** OMEMO encryption configuration */
   omemo: XmppOmemoConfigSchema.optional().describe("OMEMO encryption settings (XEP-0384)"),
+
+  /** Media security configuration */
+  media: XmppMediaSecurityConfigSchema.optional().describe("Media/file read security settings"),
 });
 
 /**
@@ -151,4 +171,43 @@ export function extractUsername(jid: string): string {
  */
 export function bareJid(jid: string): string {
   return jid.split("/")[0];
+}
+
+/**
+ * Check if a password value is an indirect reference (not plaintext)
+ */
+export function isCredentialReference(value: string | undefined | null): boolean {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  if (raw.startsWith("env:")) return true;
+  if (/^\$\{[A-Z0-9_]+\}$/.test(raw)) return true;
+  return false;
+}
+
+/**
+ * Resolve credential references from environment variables
+ */
+export function resolveCredentialReference(value: string): string {
+  const raw = value.trim();
+  if (raw.startsWith("env:")) {
+    const envName = raw.slice(4).trim();
+    if (!envName) {
+      throw new Error("Invalid env credential reference (missing variable name)");
+    }
+    const resolved = process.env[envName];
+    if (!resolved) {
+      throw new Error(`Missing environment variable for XMPP credential: ${envName}`);
+    }
+    return resolved;
+  }
+  const varMatch = raw.match(/^\$\{([A-Z0-9_]+)\}$/);
+  if (varMatch) {
+    const envName = varMatch[1];
+    const resolved = process.env[envName];
+    if (!resolved) {
+      throw new Error(`Missing environment variable for XMPP credential: ${envName}`);
+    }
+    return resolved;
+  }
+  throw new Error("XMPP password must be an environment reference (env:VAR or ${VAR})");
 }
