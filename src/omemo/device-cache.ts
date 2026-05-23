@@ -18,8 +18,6 @@ import type { PepItem } from "../pep.js";
 /** Cache TTL in milliseconds (5 minutes) */
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-/** Maximum cache age before forcing refresh (15 minutes) */
-const CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 
 // =============================================================================
 // CACHE STATE

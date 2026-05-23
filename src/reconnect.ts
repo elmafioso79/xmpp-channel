@@ -63,7 +63,11 @@ export function scheduleReconnect(
   ctx: GatewayStartContext,
   log?: Logger
 ): void {
-  const state = reconnectStates.get(accountId);
+  let state = reconnectStates.get(accountId);
+  if (!state) {
+    initReconnectState(accountId);
+    state = reconnectStates.get(accountId);
+  }
   if (!state || state.aborted) {
     log?.debug?.(`[${accountId}] Reconnect aborted or not initialized`);
     return;

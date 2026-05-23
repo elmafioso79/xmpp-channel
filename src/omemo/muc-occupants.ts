@@ -144,21 +144,21 @@ export function handleMucPresence(
   accountId: string,
   log?: Logger
 ): boolean {
-  if (!stanza.is("presence")) return false;
+  if (!stanza.is("presence")) {return false;}
   
   const from = stanza.attrs.from as string | undefined;
-  if (!from) return false;
+  if (!from) {return false;}
   
   // Parse occupant JID: room@conference/nick
   const slashIdx = from.indexOf("/");
-  if (slashIdx === -1) return false; // Not an occupant JID
+  if (slashIdx === -1) {return false;} // Not an occupant JID
   
   const roomJid = from.substring(0, slashIdx);
   const nick = from.substring(slashIdx + 1);
   
   // Check for MUC user extension
   const mucUserX = stanza.getChild("x", "http://jabber.org/protocol/muc#user");
-  if (!mucUserX) return false;
+  if (!mucUserX) {return false;}
   
   const presenceType = stanza.attrs.type as string | undefined;
   const room = getOrCreateRoom(accountId, roomJid);
@@ -193,7 +193,7 @@ export function handleMucPresence(
   
   // Parse item element for occupant details
   const item = mucUserX.getChild("item");
-  if (!item) return true; // Valid MUC presence but no item details
+  if (!item) {return true;} // Valid MUC presence but no item details
   
   const occupant: MucOccupant = {
     nick,
@@ -248,10 +248,10 @@ export function getRoomOccupantJids(
   
   const jids: string[] = [];
   for (const occupant of room.occupants.values()) {
-    if (!occupant.realJid) continue;
+    if (!occupant.realJid) {continue;}
     
     // Optionally exclude self
-    if (excludeSelf && occupant.nick === room.selfNick) continue;
+    if (excludeSelf && occupant.nick === room.selfNick) {continue;}
     
     // Avoid duplicates (same user with multiple resources)
     if (!jids.includes(occupant.realJid)) {
@@ -267,7 +267,7 @@ export function getRoomOccupantJids(
  */
 export function isRoomOmemoCapable(accountId: string, roomJid: string): boolean {
   const room = roomStates.get(roomKey(accountId, roomJid));
-  if (!room) return false;
+  if (!room) {return false;}
   return room.anonymity === "non-anonymous" && room.occupants.size > 0;
 }
 
@@ -303,10 +303,10 @@ export function getOccupantRealJid(
   nick: string
 ): string | null {
   const room = roomStates.get(roomKey(accountId, roomJid));
-  if (!room) return null;
+  if (!room) {return null;}
   
   const occupant = room.occupants.get(nick);
-  if (!occupant) return null;
+  if (!occupant) {return null;}
   
   return occupant.realJid ?? null;
 }
@@ -331,9 +331,9 @@ export function getOccupantStats(): {
   for (const room of roomStates.values()) {
     occupants += room.occupants.size;
     for (const occ of room.occupants.values()) {
-      if (occ.realJid) withRealJids++;
+      if (occ.realJid) {withRealJids++;}
     }
-    if (room.anonymity === "non-anonymous") omemoCapable++;
+    if (room.anonymity === "non-anonymous") {omemoCapable++;}
   }
   
   return {

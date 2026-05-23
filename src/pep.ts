@@ -425,13 +425,13 @@ export function parsePepEvent(stanza: Element): {
   items: PepItem[];
   retracted: string[];
 } | null {
-  if (!stanza.is("message")) return null;
+  if (!stanza.is("message")) {return null;}
 
   const event = stanza.getChild("event", NS_PUBSUB_EVENT);
-  if (!event) return null;
+  if (!event) {return null;}
 
   const items = event.getChild("items");
-  if (!items) return null;
+  if (!items) {return null;}
 
   const node = items.attrs.node;
   const from = stanza.attrs.from;
@@ -441,7 +441,7 @@ export function parsePepEvent(stanza: Element): {
 
   const children = items.children || [];
   for (const child of children) {
-    if (typeof child === "string") continue;
+    if (typeof child === "string") {continue;}
     
     const childEl = child as Element;
     if (childEl.name === "item") {

@@ -6,6 +6,7 @@
  */
 
 import type { client } from "@xmpp/client";
+import { bareJid } from "./config-schema.js";
 import type { Logger } from "./types.js";
 
 // =============================================================================
@@ -82,6 +83,19 @@ export const recentInboundMessageIds = new Map<string, string>();
 export const SENT_MESSAGE_ID_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * Check whether a JID should be treated as a known MUC room.
+ * Considers both configured groups and dynamically joined rooms.
+ */
+export function isKnownMucRoom(accountId: string, jid: string, configuredGroups?: string[]): boolean {
+  const targetRoom = bareJid(jid);
+  if (configuredGroups?.some((room) => bareJid(room) === targetRoom)) {
+    return true;
+  }
+  const joined = joinedRooms.get(accountId);
+  return joined?.has(targetRoom) ?? false;
+}
+
+/**
  * Record an inbound message ID for potential reaction fallback
  * Call this when receiving a message so we can use it as fallback if AI passes wrong ID
  */
@@ -96,15 +110,15 @@ export function recordInboundMessageId(accountId: string, fromJid: string, stanz
  */
 export function getRecentInboundMessageId(accountId: string, fromJid: string): string | undefined {
   // Try the exact key first
-  let key = `${accountId}:${fromJid}`;
+  const key = `${accountId}:${fromJid}`;
   let result = recentInboundMessageIds.get(key);
-  if (result) return result;
+  if (result) {return result;}
 
   // For MUC JIDs like "room@conference.example.com/nick", also try just the bare JID
   if (fromJid.includes("/")) {
     const bareJidKey = `${accountId}:${fromJid.split("/")[0]}`;
     result = recentInboundMessageIds.get(bareJidKey);
-    if (result) return result;
+    if (result) {return result;}
   }
 
   // For bare JIDs, also try with resource if applicable
@@ -163,7 +177,7 @@ export function cleanupAccountState(accountId: string, log?: Logger): void {
   const xmpp = activeClients.get(accountId);
   if (xmpp) {
     try {
-      xmpp.stop();
+      void xmpp.stop();
     } catch {
       // Ignore stop errors during cleanup
     }

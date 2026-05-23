@@ -14,7 +14,7 @@ Thank you for your interest in contributing to the XMPP Channel Plugin for OpenC
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/elmafioso79/xmpp-channel.git
+   git clone git@github.com:elmafioso79/xmpp-channel.git
    cd xmpp-channel
    ```
 
@@ -102,7 +102,7 @@ npm run format:check
 
 ```bash
 # Run tests
-npm test
+npm test -- --run
 ```
 
 ### Building
@@ -125,7 +125,7 @@ npm run clean && npm run build
    ```
 
 2. **Make your changes** and ensure:
-   - All tests pass (`npm test`)
+   - All tests pass (`npm test -- --run`)
    - No linting errors (`npm run lint`)
    - Code is formatted (`npm run format`)
    - Build succeeds (`npm run build`)

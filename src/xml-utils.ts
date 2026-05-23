@@ -33,7 +33,7 @@ export function fromBase64(data: string): Uint8Array {
  * Get text content from an Element (handles xmpp.js Element structure)
  */
 export function getElementText(el: Element): string {
-  if (!el || !el.children) return "";
+  if (!el?.children) {return "";}
   for (const child of el.children) {
     if (typeof child === "string") {
       return child;
@@ -46,9 +46,9 @@ export function getElementText(el: Element): string {
  * Extract human-readable error text from an IQ error element
  */
 export function extractErrorText(error: Element | undefined): string {
-  if (!error) return "Unknown error";
+  if (!error) {return "Unknown error";}
   const text = error.getChildText("text");
-  if (text) return text;
+  if (text) {return text;}
   // Try to get first child element's name as error type
   const children = error.children || [];
   for (const child of children) {
@@ -105,7 +105,7 @@ export function waitForIq(
 // =============================================================================
 
 /** Plugin version - must be updated manually when package.json version changes */
-// eslint-disable-next-line @typescript-eslint/no-inferrable-types
+ 
 export const PLUGIN_VERSION: string = "0.4.0";
 
 /**

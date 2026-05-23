@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+
+### Fixed
+
+- Reconnect scheduling now initializes missing reconnect state before computing retry delay.
+- Group replies now fail closed when OMEMO is enabled but the room is not OMEMO-capable (plaintext is blocked and a warning is sent).
+- Group-target detection now checks both configured rooms and runtime-joined rooms.
+
+### Changed
+
+- Added ESLint v9 flat config (`eslint.config.js`) and reduced warning volume with auto-fix plus targeted cleanup.
+- Updated setup and contribution docs for SSH clone workflow and one-shot test execution (`npm test -- --run`).
 
 ## [4.1.0] - 2026-02-17
 

@@ -1,17 +1,18 @@
-import type { OpenClawConfig, GroupToolPolicyConfig } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint, resolveToolsBySender } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import type { GroupToolPolicyConfig } from "openclaw/plugin-sdk/channel-policy";
+import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "openclaw/plugin-sdk/core";
+import { resolveToolsBySender } from "openclaw/plugin-sdk/channel-policy";
 import type {
   XmppConfig,
   XmppGroupConfig,
   ResolvedXmppAccount,
   XmppAccountDescriptor,
   GatewayStartContext,
-  GatewayStopResult,
   SendResult,
   ChannelAccountSnapshot,
   ThreadingToolContext,
 } from "./types.js";
-import { xmppChannelConfigSchema, bareJid } from "./config-schema.js";
+import { xmppChannelConfigSchema, bareJid, hasXmppCredentials } from "./config-schema.js";
 import { startXmppConnection } from "./monitor.js";
 import { sendXmppMessage, sendXmppMedia } from "./outbound.js";
 import { xmppOnboardingAdapter } from "./onboarding.js";
@@ -24,14 +25,14 @@ import { collectXmppStatusIssues } from "./status-issues.js";
 import { xmppDirectoryAdapter, xmppResolverAdapter } from "./directory.js";
 import { xmppMessageActions } from "./actions.js";
 import { xmppHeartbeatAdapter } from "./heartbeat.js";
-import { normalizeXmppTarget, looksLikeXmppJid, normalizeXmppMessagingTarget, normalizeAllowFrom, isSenderAllowed } from "./normalize.js";
+import { normalizeXmppTarget, looksLikeXmppJid, normalizeXmppMessagingTarget } from "./normalize.js";
 
 /**
  * Get XMPP config from OpenClaw config
  */
 function getConfig(cfg: OpenClawConfig, accountId?: string): XmppConfig {
   const xmppCfg = cfg?.channels?.xmpp as XmppConfig | undefined;
-  if (!xmppCfg) return {} as XmppConfig;
+  if (!xmppCfg) {return {} as XmppConfig;}
 
   if (accountId && xmppCfg.accounts?.[accountId]) {
     return { ...xmppCfg, ...xmppCfg.accounts[accountId] };
@@ -45,7 +46,7 @@ function getConfig(cfg: OpenClawConfig, accountId?: string): XmppConfig {
  */
 function isConfigured(cfg: OpenClawConfig, accountId?: string): boolean {
   const config = getConfig(cfg, accountId);
-  return Boolean(config.jid && config.password);
+  return hasXmppCredentials(config);
 }
 
 /**
@@ -64,7 +65,7 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\
 /**
  * XMPP Channel Plugin Definition
  */
-export const xmppPlugin = {
+export const xmppPlugin: any = {
   id: "xmpp",
   meta: {
     id: "xmpp",
@@ -82,7 +83,7 @@ export const xmppPlugin = {
   configSchema: xmppChannelConfigSchema(),
   
   capabilities: {
-    chatTypes: ["direct", "group"] as const,
+    chatTypes: ["direct", "group"],
     reactions: true, // XEP-0444
     threads: false,
     media: false, // Phase 3: XEP-0363
@@ -171,14 +172,14 @@ export const xmppPlugin = {
     disabledReason: (): string => "disabled",
     
     isConfigured: (account: ResolvedXmppAccount): boolean =>
-      Boolean(account.config?.jid && account.config?.password),
+      hasXmppCredentials(account.config ?? {}),
     unconfiguredReason: (): string => "not configured",
     
     describeAccount: (account: ResolvedXmppAccount): XmppAccountDescriptor => ({
       accountId: account.accountId,
       name: account.config?.name || "XMPP",
       enabled: account.enabled,
-      configured: Boolean(account.config?.jid),
+      configured: hasXmppCredentials(account.config ?? {}),
       dmPolicy: account.config?.dmPolicy,
       allowFrom: account.config?.allowFrom,
     }),
@@ -225,7 +226,7 @@ export const xmppPlugin = {
       // Get group settings (keyed by room JID or "*" for default)
       const groupsConfig: Record<string, XmppGroupConfig> | undefined = accountConfig.groupSettings;
       
-      if (!groupsConfig) return undefined;
+      if (!groupsConfig) {return undefined;}
       
       // First try specific group, then fallback to "*" default
       const groupId = params.groupId ?? undefined;
@@ -242,11 +243,11 @@ export const xmppPlugin = {
           senderUsername: params.senderUsername ?? undefined,
           senderE164: params.senderE164 ?? undefined,
         });
-        if (senderPolicy) return senderPolicy;
+        if (senderPolicy) {return senderPolicy;}
       }
       
       // 2. Check group-level tools policy
-      if (groupConfig?.tools) return groupConfig.tools;
+      if (groupConfig?.tools) {return groupConfig.tools;}
       
       // 3. Check sender-specific policy for default group
       if (defaultConfig?.toolsBySender) {
@@ -257,11 +258,11 @@ export const xmppPlugin = {
           senderUsername: params.senderUsername ?? undefined,
           senderE164: params.senderE164 ?? undefined,
         });
-        if (senderPolicy) return senderPolicy;
+        if (senderPolicy) {return senderPolicy;}
       }
       
       // 4. Check default group tools policy
-      if (defaultConfig?.tools) return defaultConfig.tools;
+      if (defaultConfig?.tools) {return defaultConfig.tools;}
       
       return undefined;
     },
@@ -271,7 +272,7 @@ export const xmppPlugin = {
   mentions: {
     stripPatterns: ({ ctx }: { ctx: { To?: string } }) => {
       const selfJid = ctx.To?.replace(/^xmpp:/, "") || "";
-      if (!selfJid) return [];
+      if (!selfJid) {return [];}
       const escaped = escapeRegExp(bareJid(selfJid));
       return [escaped, `@${escaped}`];
     },
@@ -417,13 +418,13 @@ export const xmppPlugin = {
           const url = new URL(mediaUrl);
           if (url.protocol === "file:") {
             const { readFileUrl } = await import("./file-read.js");
-            resolvedMedia = readFileUrl(mediaUrl, typedLog);
+            resolvedMedia = readFileUrl(mediaUrl, typedLog, { accountId: accountId ?? undefined, config });
           }
         } catch {
           // Not a valid URL — treat as local file path
           const { readLocalFile } = await import("./file-read.js");
-          const result = readLocalFile(mediaUrl, typedLog);
-          if (!result) throw new Error(`File not found: ${mediaUrl}`);
+          const result = readLocalFile(mediaUrl, typedLog, { accountId: accountId ?? undefined, config });
+          if (!result) {throw new Error(`File not found: ${mediaUrl}`);}
           resolvedMedia = result;
         }
         
@@ -482,7 +483,7 @@ export const xmppPlugin = {
     },
     
     buildChannelSummary: async ({ account, snapshot }: { account: ResolvedXmppAccount; snapshot?: ChannelAccountSnapshot }) => ({
-      configured: Boolean(account.config?.jid && account.config?.password),
+      configured: hasXmppCredentials(account.config ?? {}),
       enabled: account.enabled,
       running: snapshot?.running ?? false,
       connected: snapshot?.connected ?? false,
@@ -496,7 +497,7 @@ export const xmppPlugin = {
       accountId: account.accountId,
       name: account.config?.name,
       enabled: account.enabled,
-      configured: Boolean(account.config?.jid && account.config?.password),
+      configured: hasXmppCredentials(account.config ?? {}),
       running: runtime?.running ?? false,
       connected: runtime?.connected ?? false,
       lastStartAt: runtime?.lastStartAt ?? null,

@@ -2,14 +2,14 @@
  * XMPP actions handler (reactions, polls, etc.)
  */
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { jsonResult } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { jsonResult } from "openclaw/plugin-sdk/core";
 import type { ChannelMessageActionName } from "./types.js";
 import { getActiveClient } from "./monitor.js";
 import { resolveXmppAccount } from "./accounts.js";
 import { bareJid } from "./config-schema.js";
 import { xml } from "@xmpp/client";
-import { getServerMessageId, getRecentInboundMessageId } from "./state.js";
+import { getServerMessageId, getRecentInboundMessageId, isKnownMucRoom } from "./state.js";
 import {
   isOmemoEnabled,
   encryptOmemoMessage,
@@ -38,7 +38,7 @@ function createActionGate(
   actions?: Record<string, boolean>
 ): (action: string) => boolean {
   return (action: string) => {
-    if (!actions) return false;
+    if (!actions) {return false;}
     return actions[action] === true;
   };
 }
@@ -111,8 +111,8 @@ export async function handleXmppAction(params: {
     return jsonResult({ ok: false, error: "XMPP client not connected" });
   }
 
-  // Check if targetJid is in groups list
-  const isMuc = Boolean(config.groups?.some((room) => bareJid(room) === bareJid(targetJid)));
+  // Check if targetJid is a known MUC room (configured or dynamically joined)
+  const isMuc = isKnownMucRoom(account.accountId, targetJid, config.groups);
 
   // Determine message type: groupchat for MUC rooms, chat for DMs
   const msgType = isMuc ? "groupchat" : "chat";
@@ -223,6 +223,12 @@ export async function handleXmppAction(params: {
  * XMPP Message Actions adapter
  */
 export const xmppMessageActions = {
+  describeMessageTool: ({ cfg }: { cfg: OpenClawConfig }) => ({
+    actions: listXmppActions(cfg),
+    capabilities: [],
+    schema: [],
+    mediaSourceParams: [],
+  }),
   listActions: ({ cfg }: { cfg: OpenClawConfig }) => listXmppActions(cfg),
 
   supportsAction: ({ action }: { action: string }) => supportsXmppAction(action),

@@ -29,7 +29,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
 ### Manual Installation
 1. Clone the repository:
    ```bash
-   git clone https://github.com/elmafioso79/xmpp-channel.git ~/.openclaw/extensions/xmpp
+   git clone git@github.com:elmafioso79/xmpp-channel.git ~/.openclaw/extensions/xmpp
    ```
 2. Install dependencies and build:
    ```bash
@@ -38,8 +38,7 @@ XMPP/Jabber channel plugin for OpenClaw, supporting Prosody, ejabberd, and other
    npm run build
    ```
 3. Configure with openclaw or add to your `openclaw.json`:
-   ```
-   json
+   ```json
    {
      "channels": {
        "xmpp": {
@@ -209,6 +208,7 @@ When OMEMO is enabled:
 - Incoming encrypted messages are automatically decrypted
 - Outgoing messages are automatically encrypted for all recipient devices
 - Group chat messages are encrypted for all room occupants (requires non-anonymous rooms)
+- If a room is not OMEMO-capable, group replies are blocked and a warning is sent instead of plaintext
 - The bot uses **always-trust** policy (accepts any identity key without verification)
 - Keys are persisted across restarts via OpenClaw's key-value storage
 
@@ -260,6 +260,9 @@ openclaw channels status
 npm install          # Install dependencies
 npm run build        # Compile TypeScript
 npm run dev          # Watch mode
+npm run lint         # ESLint check (flat config in eslint.config.js)
+npm run lint:fix     # Apply ESLint auto-fixes
+npm test -- --run    # Run tests once
 ```
 
 ## Architecture

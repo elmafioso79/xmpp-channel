@@ -114,14 +114,14 @@ export async function fetchBundle(
  */
 function parseBundle(element: Element): OmemoBundle | null {
   try {
-    if (!element || element.name !== "bundle") {
+    if (element?.name !== "bundle") {
       return null;
     }
 
     // Identity key (legacy uses 'identityKey', OMEMO 2.0 uses 'ik')
     let ikText = element.getChildText("identityKey");
-    if (!ikText) ikText = element.getChildText("ik");
-    if (!ikText) return null;
+    if (!ikText) {ikText = element.getChildText("ik");}
+    if (!ikText) {return null;}
 
     // Signed pre-key (legacy vs OMEMO 2.0 element names)
     let spk = element.getChild("signedPreKeyPublic");
@@ -134,15 +134,15 @@ function parseBundle(element: Element): OmemoBundle | null {
       spksText = element.getChildText("spks");
       spkIdAttr = "id";
     }
-    if (!spk || !spksText) return null;
+    if (!spk || !spksText) {return null;}
 
     const spkId = parseInt(spk.attrs?.[spkIdAttr], 10);
     const spkText = getElementText(spk);
-    if (isNaN(spkId) || !spkText) return null;
+    if (isNaN(spkId) || !spkText) {return null;}
 
     // Pre-keys (legacy uses 'preKeyPublic' with 'preKeyId', OMEMO 2.0 uses 'pk' with 'id')
     const prekeysElement = element.getChild("prekeys");
-    if (!prekeysElement) return null;
+    if (!prekeysElement) {return null;}
 
     // Try legacy format first
     let preKeyElements = prekeysElement.getChildren("preKeyPublic");
@@ -176,7 +176,7 @@ function parseBundle(element: Element): OmemoBundle | null {
       },
       preKeys,
     };
-  } catch (err) {
+  } catch {
     return null;
   }
 }

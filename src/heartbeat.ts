@@ -2,7 +2,7 @@
  * XMPP heartbeat adapter
  */
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import { resolveXmppAccount } from "./accounts.js";
 import { getActiveClient } from "./monitor.js";
 

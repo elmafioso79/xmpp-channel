@@ -11,22 +11,18 @@ import type { Element } from "@xmpp/client";
 import type { Logger } from "../types.js";
 import { toBase64, fromBase64, getElementText } from "../xml-utils.js";
 import { OmemoStore } from "./store.js";
-import { publishDeviceId, fetchDeviceList } from "./device.js";
+import { publishDeviceId } from "./device.js";
 import { publishBundle, fetchBundle, buildBundleFromStore } from "./bundle.js";
-import { NS_OMEMO, NS_OMEMO_DEVICES, OMEMO_NAMESPACES, NS_OMEMO_LEGACY, NS_OMEMO_V2, type OmemoStoreData, type OmemoDevice } from "./types.js";
+import { NS_OMEMO, OMEMO_NAMESPACES, NS_OMEMO_V2, type OmemoDevice } from "./types.js";
 import { loadOmemoStoreData, saveOmemoStoreData } from "./persistence.js";
 import {
   getDeviceList,
-  handleDeviceListPepEvent,
   clearDeviceCache,
-  getDeviceCacheStats,
 } from "./device-cache.js";
 import {
   getRoomOccupantJids,
   isRoomOmemoCapable,
-  getRoomAnonymity,
   clearAllRoomStates,
-  getOccupantStats,
   getOccupantRealJid,
 } from "./muc-occupants.js";
 
@@ -73,6 +69,8 @@ const omemoStores = new Map<string, OmemoStore>();
 
 /** Accounts with OMEMO enabled */
 const omemoEnabled = new Set<string>();
+/** Per-account cap for devices encrypted per JID */
+const omemoMaxDevicesPerJid = new Map<string, number>();
 
 // =============================================================================
 // INITIALIZATION
@@ -90,7 +88,8 @@ export async function initializeOmemo(
   accountId: string,
   selfJid: string,
   deviceLabel?: string,
-  log?: Logger
+  log?: Logger,
+  options?: { maxDevicesPerJid?: number }
 ): Promise<OmemoStore> {
   try {
     // Create store
@@ -137,6 +136,7 @@ export async function initializeOmemo(
     // Track store
     omemoStores.set(accountId, store);
     omemoEnabled.add(accountId);
+    omemoMaxDevicesPerJid.set(accountId, Math.max(1, options?.maxDevicesPerJid ?? 10));
     
     log?.info?.(`[${accountId}] OMEMO initialized (device ${store.getDeviceId()})`);
     return store;
@@ -236,7 +236,12 @@ export async function shutdownOmemo(accountId: string, log?: Logger): Promise<vo
   
   omemoStores.delete(accountId);
   omemoEnabled.delete(accountId);
+  omemoMaxDevicesPerJid.delete(accountId);
   log?.debug?.(`[${accountId}] OMEMO shutdown`);
+}
+
+function getMaxDevicesPerJid(accountId: string): number {
+  return Math.max(1, omemoMaxDevicesPerJid.get(accountId) ?? 10);
 }
 
 // =============================================================================
@@ -275,12 +280,12 @@ export function isOmemoEncrypted(stanza: Element): boolean {
 function isPreKeyElement(keyEl: Element, namespace: string): boolean {
   // Legacy format: prekey attribute
   const prekey = keyEl.attrs?.prekey as string | undefined;
-  if (prekey === "true" || prekey === "1") return true;
+  if (prekey === "true" || prekey === "1") {return true;}
   
   // OMEMO 2.0: kex attribute (key exchange)
   if (namespace === NS_OMEMO_V2) {
     const kex = keyEl.attrs?.kex as string | undefined;
-    if (kex === "true" || kex === "1") return true;
+    if (kex === "true" || kex === "1") {return true;}
   }
   
   return false;
@@ -308,7 +313,7 @@ export async function decryptOmemoMessage(
   }
 
   const encryptedInfo = getOmemoEncrypted(stanza);
-  if (!encryptedInfo) return null;
+  if (!encryptedInfo) {return null;}
   
   const { element: encrypted, namespace } = encryptedInfo;
   const isV2 = namespace === NS_OMEMO_V2;
@@ -355,7 +360,7 @@ export async function decryptOmemoMessage(
         ourKeyElement = keyElements.find(
           (k) => parseInt(k.attrs?.rid, 10) === ourDeviceId
         );
-        if (ourKeyElement) break;
+        if (ourKeyElement) {break;}
       }
     } else {
       ourKeyElement = keyElements.find(
@@ -612,14 +617,15 @@ export async function encryptOmemoMessage(
 
   try {
     // Fetch recipient's devices (uses cache if available)
-    const devices = await getDeviceList(accountId, recipientJid, false, log);
+    const maxDevicesPerJid = getMaxDevicesPerJid(accountId);
+    const devices = (await getDeviceList(accountId, recipientJid, false, log)).slice(0, maxDevicesPerJid);
     if (devices.length === 0) {
       log?.warn?.(`[${accountId}] No OMEMO devices for ${recipientJid}`);
       return null;
     }
 
     // Also include our own devices (except current one) for multi-device sync
-    const ownDevices = await getDeviceList(accountId, "", false, log);
+    const ownDevices = (await getDeviceList(accountId, "", false, log)).slice(0, maxDevicesPerJid);
     const ourDeviceId = store.getDeviceId();
     const otherOwnDevices = ownDevices.filter(d => d.id !== ourDeviceId);
 
@@ -773,10 +779,11 @@ export async function encryptMucOmemoMessage(
 
   try {
     // Collect all devices from all occupants
+    const maxDevicesPerJid = getMaxDevicesPerJid(accountId);
     const allDevices: Array<{ jid: string; deviceId: number }> = [];
     
     for (const jid of occupantJids) {
-      const devices = await getDeviceList(accountId, jid, false, log);
+      const devices = (await getDeviceList(accountId, jid, false, log)).slice(0, maxDevicesPerJid);
       for (const device of devices) {
         allDevices.push({ jid, deviceId: device.id });
       }
@@ -790,8 +797,7 @@ export async function encryptMucOmemoMessage(
     // Also include our own devices for multi-device sync
     // Unlike DMs, MUC messages are reflected back by the server, so we MUST
     // encrypt for our own device(s) to read the reflected message
-    const ownDevices = await getDeviceList(accountId, "", false, log);
-    const ourDeviceId = store.getDeviceId();
+    const ownDevices = (await getDeviceList(accountId, "", false, log)).slice(0, maxDevicesPerJid);
     // For MUC, include ALL own devices including current one (for reflected messages)
     const ownDevicesToEncrypt = ownDevices;
 
@@ -1024,30 +1030,6 @@ async function encryptPayloadLegacy(
   return { ciphertext, authTag };
 }
 
-/**
- * Encrypt payload using AES-256-GCM
- */
-async function encryptPayload(
-  plaintext: string,
-  key: Uint8Array,
-  iv: Uint8Array
-): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    key.buffer.slice(key.byteOffset, key.byteOffset + key.byteLength) as ArrayBuffer,
-    { name: "AES-GCM" },
-    false,
-    ["encrypt"]
-  );
-
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer, tagLength: 128 },
-    cryptoKey,
-    new TextEncoder().encode(plaintext)
-  );
-
-  return new Uint8Array(encrypted);
-}
 
 // =============================================================================
 // MESSAGE BUILDING

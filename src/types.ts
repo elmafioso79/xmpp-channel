@@ -1,4 +1,5 @@
-import type { OpenClawConfig, RuntimeEnv, WizardPrompter } from "openclaw/plugin-sdk";
+import type { OpenClawConfig, WizardPrompter } from "openclaw/plugin-sdk/core";
+import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 
 /**
  * Direct chat policy type
@@ -18,6 +19,16 @@ export interface XmppActionConfig {
   reactions?: boolean;
   /** Enable send message action */
   sendMessage?: boolean;
+}
+
+/**
+ * Media security configuration
+ */
+export interface XmppMediaSecurityConfig {
+  /** Allow file:// URLs for local file reads (default: false) */
+  allowFileUrls?: boolean;
+  /** Allowlisted local roots for file reads */
+  allowedLocalPaths?: string[];
 }
 
 /**
@@ -52,6 +63,8 @@ export interface XmppOmemoConfig {
   enabled?: boolean;
   /** Device label for this bot instance */
   deviceLabel?: string;
+  /** Maximum devices per JID to encrypt for (default: 10) */
+  maxDevicesPerJid?: number;
 }
 
 /**
@@ -86,6 +99,10 @@ export interface XmppConfig {
   dmAllowlist?: string[];
   /** Allowed sender JIDs for groups (if different from allowFrom) */
   groupAllowFrom?: string[];
+  /** Allowed inviter JIDs for auto-joining MUC invites (defaults to allowFrom) */
+  inviteAllowFrom?: string[];
+  /** Allow SASL PLAIN fallback when stronger mechanisms are unavailable */
+  allowSaslPlain?: boolean;
   /** Group chat rooms to join */
   groups?: string[];
   /** Action configuration (reactions, etc.) */
@@ -100,6 +117,8 @@ export interface XmppConfig {
   sendReadReceipts?: boolean;
   /** OMEMO encryption configuration */
   omemo?: XmppOmemoConfig;
+  /** Media/file security configuration */
+  media?: XmppMediaSecurityConfig;
   /** Multi-account configuration */
   accounts?: Record<string, XmppConfig>;
 }

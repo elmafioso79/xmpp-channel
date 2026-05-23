@@ -3,8 +3,8 @@ import type { XmppConfig, SendResult, Logger } from "./types.js";
 import { getActiveClient } from "./monitor.js";
 import { bareJid, resolveServer } from "./config-schema.js";
 import { getUploadService, uploadAndGetUrl, buildOobElement, downloadUrl } from "./http-upload.js";
-import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, buildOmemoMessageStanza, isRoomOmemoCapable } from "./omemo/index.js";
-import { sentMessageIds } from "./state.js";
+import { isOmemoEnabled, encryptOmemoMessage, encryptMucOmemoMessage, buildOmemoMessageStanza } from "./omemo/index.js";
+import { isKnownMucRoom } from "./state.js";
 
 export interface ResolvedMedia {
   data: Buffer;
@@ -33,7 +33,7 @@ export async function sendXmppMessage(
 
   try {
     // Determine if this is a group room or direct message
-    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(to));
+    const isMuc = isKnownMucRoom(accountId, to, config.groups);
     const msgType = isMuc ? "groupchat" : "chat";
 
     // When OMEMO is enabled, always encrypt outbound messages
@@ -152,7 +152,7 @@ export async function sendXmppMedia(
   }
 
   try {
-    const isMuc = config.groups?.some((room) => bareJid(room) === bareJid(to));
+    const isMuc = isKnownMucRoom(accountId, to, config.groups);
     const msgType = isMuc ? "groupchat" : "chat";
     const serverDomain = resolveServer(config);
 
@@ -217,7 +217,7 @@ export async function sendXmppMedia(
 
       try {
         // Send encrypted caption first if present
-        if (caption && caption.trim()) {
+        if (caption?.trim()) {
           const captionEnc = await encryptFn(caption);
           if (captionEnc) {
             const captionStanza = buildOmemoMessageStanza(to, captionEnc, msgType);
@@ -259,7 +259,7 @@ export async function sendXmppMedia(
     }
 
     // OMEMO not enabled — send plaintext
-    if (caption && caption.trim()) {
+    if (caption?.trim()) {
       log?.debug?.(`[XMPP] Sending caption as separate message: ${caption.slice(0, 50)}...`);
       const captionMessage = xml(
         "message",

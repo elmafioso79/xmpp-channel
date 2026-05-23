@@ -7,16 +7,16 @@
 
 import { client, xml } from "@xmpp/client";
 import type { Element } from "@xmpp/client";
+import { createRequire } from "module";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 import type { XmppConfig, GatewayStartContext, XmppInboundMessage, Logger } from "./types.js";
-import { resolveServer, extractUsername, bareJid } from "./config-schema.js";
+import { resolveServer, extractUsername, bareJid, isCredentialReference, resolveCredentialReference } from "./config-schema.js";
 import { parsePepEvent, type PepItem } from "./pep.js";
 
 // Import from split modules
 import {
   activeClients,
   reconnectStates,
-  RECONNECT_BASE_DELAY_MS,
-  cleanupAccountState,
   sentMessageIds,
 } from "./state.js";
 import { joinMuc, getPersistedRooms } from "./rooms.js";
@@ -28,7 +28,6 @@ import {
   abortReconnect,
   scheduleReconnect,
 } from "./reconnect.js";
-import { sendChatState, sendChatMarker } from "./chat-state.js";
 import { setupPresenceHandlers, setupMucInviteHandler } from "./stanza-handlers.js";
 import { setupIqHandlers } from "./iq-handlers.js";
 import { handleInboundMessage, handleInboundReaction } from "./inbound.js";
@@ -42,6 +41,76 @@ import {
   shutdownOmemo,
   handleDeviceListPepEvent,
 } from "./omemo/index.js";
+
+const require = createRequire(import.meta.url);
+const xmppXml = require("@xmpp/xml") as {
+  Parser: new () => {
+    on: (event: string, listener: (arg: unknown) => void) => void;
+    end: (input?: string) => void;
+  };
+};
+
+const NS_SCE = "urn:xmpp:sce:1";
+const NS_REACTIONS = "urn:xmpp:reactions:0";
+const MAX_REACTION_ID_LENGTH = 256;
+
+function parseXmlElement(xmlPayload: string): Element | null {
+  try {
+    const parser = new xmppXml.Parser();
+    let root: Element | null = null;
+    let failed = false;
+    parser.on("start", (element) => {
+      root = element as Element;
+    });
+    parser.on("end", (element) => {
+      root = element as Element;
+    });
+    parser.on("error", () => {
+      failed = true;
+    });
+    parser.end(xmlPayload);
+    if (failed) {return null;}
+    return root;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeReactionMessageId(rawId: string | undefined): string | null {
+  const normalized = String(rawId ?? "")
+    .normalize("NFC")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim();
+  if (!normalized || normalized.length > MAX_REACTION_ID_LENGTH) {
+    return null;
+  }
+  return normalized;
+}
+
+function parseSceWrappedReaction(body: string): { reactedMessageId: string; emojis: string[] } | null {
+  if (!body.includes("<envelope") || !body.includes(NS_SCE)) {
+    return null;
+  }
+  const envelope = parseXmlElement(body);
+  if (!envelope) {return null;}
+  if (envelope.name !== "envelope") {return null;}
+  if (envelope.attrs?.xmlns !== NS_SCE) {return null;}
+
+  const content = envelope.getChild("content", NS_SCE) ?? envelope.getChild("content");
+  if (!content) {return null;}
+  const reactions = content.getChild("reactions", NS_REACTIONS) ?? content.getChild("reactions");
+  if (!reactions) {return null;}
+
+  const reactedMessageId = sanitizeReactionMessageId(reactions.attrs?.id);
+  if (!reactedMessageId) {return null;}
+
+  const emojis = reactions
+    .getChildren("reaction")
+    .map((reaction) => String(reaction.text?.() ?? "").trim())
+    .filter(Boolean);
+
+  return { reactedMessageId, emojis };
+}
 
 // =============================================================================
 // RE-EXPORTS for backward compatibility
@@ -122,13 +191,21 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
   const config = account.config;
 
   log?.debug?.(`[${accountId}] Gateway context: hasSetStatus=${!!setStatus}`);
-
-  if (!config.jid || !config.password) {
+  const jid = String(config.jid ?? "").trim();
+  const passwordInput = String(config.password ?? "").trim();
+  if (!jid || !passwordInput) {
     throw new Error("XMPP jid and password are required");
   }
-
-  const server = resolveServer(config);
-  const username = extractUsername(config.jid);
+  const server = resolveServer({ jid, server: config.server });
+  const username = extractUsername(jid);
+  const resolvedPassword = isCredentialReference(passwordInput)
+    ? resolveCredentialReference(passwordInput)
+    : passwordInput;
+  if (!isCredentialReference(passwordInput)) {
+    log?.warn?.(
+      `[${accountId}] XMPP password is configured as plaintext. Prefer env:VAR or \${VAR} to avoid storing credentials in config.`
+    );
+  }
   
   // Generate unique resource per session to prevent connection conflicts on restart
   const sessionResource = config.resource ?? `openclaw-${generateSessionId()}`;
@@ -151,13 +228,28 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     log?.error?.(`[${accountId}] XMPP ERROR: setStatus function not provided by OpenClaw!`);
   }
 
+  const credentials = async (
+    authenticate: (creds: { username: string; password: string }) => Promise<void>,
+    mechanism?: string,
+  ) => {
+    const selected = String(mechanism ?? "").toUpperCase();
+    if (selected === "PLAIN" && config.allowSaslPlain !== true) {
+      throw new Error("Server selected SASL PLAIN; set channels.xmpp.allowSaslPlain=true to allow");
+    }
+    if (selected === "ANONYMOUS") {
+      throw new Error("Refusing SASL ANONYMOUS for authenticated XMPP account");
+    }
+    await authenticate({ username, password: resolvedPassword });
+  };
+
   const xmpp = client({
     service: `xmpp://${server}:${config.port ?? 5222}`,
     domain: server,
     username,
-    password: config.password,
+    password: resolvedPassword,
+    credentials,
     resource: sessionResource,
-  });
+  } as unknown as Parameters<typeof client>[0]);
 
   // Store client for outbound messaging
   activeClients.set(accountId, xmpp);
@@ -186,10 +278,10 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
   setupMessageHandler(xmpp, accountId, nickname, cfg, config, log, setStatus);
 
   // Setup presence handlers (subscriptions, MUC self-presence, errors)
-  setupPresenceHandlers(xmpp, accountId, log);
+  setupPresenceHandlers(xmpp, accountId, config, log);
 
   // Setup MUC invite handler
-  setupMucInviteHandler(xmpp, accountId, nickname, log);
+  setupMucInviteHandler(xmpp, accountId, nickname, config, log);
 
   // Setup IQ handlers (XEP-0092 version, XEP-0202 time)
   setupIqHandlers(xmpp, accountId, log);
@@ -238,7 +330,9 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     // Initialize OMEMO if enabled
     if (config.omemo?.enabled) {
       try {
-        await initializeOmemo(accountId, config.jid, config.omemo.deviceLabel, log);
+        await initializeOmemo(accountId, config.jid, config.omemo.deviceLabel, log, {
+          maxDevicesPerJid: config.omemo.maxDevicesPerJid,
+        });
       } catch (err) {
         log?.error?.(`[${accountId}] OMEMO initialization failed: ${err instanceof Error ? err.message : String(err)}`);
         // Continue without OMEMO - non-fatal
@@ -261,7 +355,7 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     // Join persisted rooms (from previous invites)
     const persistedRooms = getPersistedRooms(accountId, log);
     for (const roomJid of persistedRooms) {
-      if (config.groups?.includes(roomJid)) continue;
+      if (config.groups?.includes(roomJid)) {continue;}
       log?.info?.(`[${accountId}] Rejoining persisted room: ${roomJid}`);
       await joinMuc(xmpp, roomJid, nickname, log, accountId, true);
     }
@@ -306,7 +400,7 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
     
     const cleanup = () => {
       const state = reconnectStates.get(accountId);
-      if (state?.aborted) return;
+      if (state?.aborted) {return;}
       
       abortReconnect(accountId);
       
@@ -315,11 +409,11 @@ export async function startXmppConnection(ctx: GatewayStartContext): Promise<voi
       stopKeepalive(accountId);
       
       // Shutdown OMEMO
-      shutdownOmemo(accountId, log).catch((err) => {
+      void shutdownOmemo(accountId, log).catch((err) => {
         log?.warn?.(`[${accountId}] OMEMO shutdown error: ${err}`);
       });
       
-      xmpp.stop();
+      void xmpp.stop();
       activeClients.delete(accountId);
       
       setStatus?.({
@@ -355,7 +449,7 @@ function setupMessageHandler(
   xmpp.on("stanza", async (stanza) => {
     log?.debug?.(`[${accountId}] XMPP stanza received: attrs=${JSON.stringify(stanza.attrs)}`);
     
-    if (!stanza.is("message")) return;
+    if (!stanza.is("message")) {return;}
 
     // Check for PEP events first
     const pepEvent = parsePepEvent(stanza as Element);
@@ -442,9 +536,6 @@ function setupMessageHandler(
     const emeHint = stanza.getChild("encryption", "urn:xmpp:eme:0");
     const isOmemoStanza = hasOmemoEncryption || emeHint?.attrs?.name === "OMEMO";
     
-    // SCE (Stanza Content Encryption) namespace for parsing wrapped content
-    const NS_SCE = "urn:xmpp:sce:1";
-    
     if (isOmemoEnabled(accountId) && hasOmemoEncryption) {
       log?.debug?.(`[${accountId}] OMEMO encrypted message detected`);
       try {
@@ -454,58 +545,41 @@ function setupMessageHandler(
           log?.debug?.(`[${accountId}] OMEMO decryption successful`);
           
           // XEP-0444 + XEP-0420: Check if decrypted payload contains SCE-wrapped reactions
-          // The decrypted payload may be an SCE envelope containing <reactions> inside <content>
-          // Format: <envelope xmlns="urn:xmpp:sce:1"><content><reactions>...</reactions></content></envelope>
           try {
-            // Check if body is SCE envelope (starts with <envelope)
-            if (body.includes("<envelope") && body.includes("urn:xmpp:sce:1")) {
-              log?.debug?.(`[${accountId}] Detected SCE envelope in OMEMO payload`);
-              
-              // Parse the reactions from the SCE envelope using regex
-              // The structure is: <envelope ...><content><reactions ...>...</reactions></content></envelope>
-              const reactionsMatch = body.match(/<reactions\s+[^>]*id=["']([^"']+)["'][^>]*>.*?<\/reactions>/s);
-              if (reactionsMatch) {
-                // Extract the full reactions element
-                const reactionsXml = reactionsMatch[0];
-                const reactedMsgId = reactionsMatch[1];
-                
-                // Extract individual reactions
-                const emojiMatches = reactionsXml.match(/<reaction[^>]*>([^<]*)<\/reaction>/g) || [];
-                const emojis = emojiMatches.map(m => {
-                  const match = m.match(/<reaction[^>]*>([^<]*)<\/reaction>/);
-                  return match ? match[1] : "";
-                }).filter(Boolean);
-                
-                const senderBare = bareJid(from);
-                if (emojis.length > 0) {
-                  log?.info?.(`[${accountId}] XEP-0444 OMEMO-encrypted reaction from ${senderBare}: ${emojis.join(", ")} on message ${reactedMsgId}`);
-                } else {
-                  log?.info?.(`[${accountId}] XEP-0444 OMEMO-encrypted reaction removed by ${senderBare} on message ${reactedMsgId}`);
-                }
-                
-                // Determine if this is a groupchat or direct message
-                const roomJid = isGroupchat ? bareJid(from) : undefined;
-                const senderNick = isGroupchat ? from.split("/")[1] : undefined;
-                
-                // Route OMEMO-encrypted reaction to OpenClaw so the AI can see and process it
-                await handleInboundReaction({
-                  reactedMessageId: reactedMsgId || "",
-                  emojis,
-                  senderBare,
-                  senderFull: from,
-                  isGroup: isGroupchat,
-                  roomJid,
-                  senderNick,
-                  cfg,
-                  accountId,
-                  config,
-                  log,
-                  setStatus,
-                });
-                
-                // Reaction processed - don't continue with normal message handling
-                return;
+            const parsedReaction = parseSceWrappedReaction(body);
+            if (parsedReaction) {
+              log?.debug?.(`[${accountId}] Parsed SCE-wrapped reaction payload`);
+              const senderBare = bareJid(from);
+              if (parsedReaction.emojis.length > 0) {
+                log?.info?.(
+                  `[${accountId}] XEP-0444 OMEMO-encrypted reaction from ${senderBare}: ${parsedReaction.emojis.join(", ")} on message ${parsedReaction.reactedMessageId}`,
+                );
+              } else {
+                log?.info?.(
+                  `[${accountId}] XEP-0444 OMEMO-encrypted reaction removed by ${senderBare} on message ${parsedReaction.reactedMessageId}`,
+                );
               }
+
+              const roomJid = isGroupchat ? bareJid(from) : undefined;
+              const senderNick = isGroupchat ? from.split("/")[1] : undefined;
+
+              await handleInboundReaction({
+                reactedMessageId: parsedReaction.reactedMessageId,
+                emojis: parsedReaction.emojis,
+                senderBare,
+                senderFull: from,
+                isGroup: isGroupchat,
+                roomJid,
+                senderNick,
+                cfg: cfg as OpenClawConfig,
+                accountId,
+                config,
+                log,
+                setStatus,
+              });
+
+              // Reaction processed - don't continue with normal message handling
+              return;
             }
           } catch (sceErr) {
             log?.warn?.(`[${accountId}] Failed to parse SCE envelope: ${sceErr}`);
@@ -534,7 +608,11 @@ function setupMessageHandler(
     // XEP-0444: Detect incoming reactions (reactions have no body)
     const reactionsEl = stanza.getChild("reactions", "urn:xmpp:reactions:0");
     if (reactionsEl) {
-      const reactedMsgId = reactionsEl.attrs.id;
+      const reactedMsgId = sanitizeReactionMessageId(reactionsEl.attrs.id);
+      if (!reactedMsgId) {
+        log?.warn?.(`[${accountId}] Ignoring reaction with missing/invalid message id from ${from}`);
+        return;
+      }
       const reactionChildren = reactionsEl.getChildren("reaction");
       const emojis = reactionChildren.map((r) => r.text?.() ?? "").filter(Boolean);
       const senderBare = bareJid(from);
@@ -560,7 +638,7 @@ function setupMessageHandler(
         isGroup: isGroupchat,
         roomJid,
         senderNick,
-        cfg,
+        cfg: cfg as OpenClawConfig,
         accountId,
         config,
         log,
@@ -573,14 +651,14 @@ function setupMessageHandler(
       return;
     }
     
-    if (!body) return;
+    if (!body) {return;}
 
     // History check already done earlier (before OMEMO decryption)
 
     const to = stanza.attrs.to;
     const id = stanza.attrs.id || `msg_${Date.now()}`;
 
-    let senderJid = from;
+    const senderJid = from;
     let roomJid: string | undefined;
     let senderNick: string | undefined;
 
@@ -655,6 +733,6 @@ function setupMessageHandler(
       senderJidForOmemo: bareJid(from),
     };
 
-    await handleInboundMessage(message, cfg, accountId, config, log, setStatus);
+    await handleInboundMessage(message, cfg as OpenClawConfig, accountId, config, log, setStatus);
   });
 }

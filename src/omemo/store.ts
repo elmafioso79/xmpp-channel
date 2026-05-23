@@ -22,6 +22,15 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 }
 
+function hasNumericByteLength(value: unknown): value is { byteLength: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "byteLength" in value &&
+    typeof (value as { byteLength: unknown }).byteLength === "number"
+  );
+}
+
 /**
  * Generate session key from JID and device ID
  * Uses '.' as separator to match Signal library's SignalProtocolAddress.toString()
@@ -43,7 +52,7 @@ let signalLoadError: Error | null = null;
  */
 async function loadSignalLib(): Promise<SignalLib> {
   if (signalLoaded) {
-    if (signalLoadError) throw signalLoadError;
+    if (signalLoadError) {throw signalLoadError;}
     return signalLib;
   }
   
@@ -86,6 +95,7 @@ export class OmemoStore {
   // Note: Signal library may store sessions as JSON strings OR ArrayBuffers depending on implementation
   private sessions = new Map<string, string | ArrayBuffer>();
   private identities = new Map<string, ArrayBuffer>();
+  private identityConflicts = new Set<string>();
 
   // Persistence callback
   private persistCallback?: () => Promise<void>;
@@ -390,11 +400,30 @@ export class OmemoStore {
    * Check if identity is trusted - ALWAYS TRUE (blind trust)
    */
   async isTrustedIdentity(
-    _identifier: string,
-    _identityKey: ArrayBuffer,
+    identifier: string,
+    identityKey: ArrayBuffer,
     _direction: number
   ): Promise<boolean> {
-    // ALWAYS TRUST - bot accepts any identity key
+    const existing = this.identities.get(identifier);
+    if (!existing) {
+      // Trust on first use (TOFU)
+      return true;
+    }
+
+    const existingArr = new Uint8Array(existing);
+    const newArr = new Uint8Array(identityKey);
+    if (existingArr.length !== newArr.length) {
+      this.identityConflicts.add(identifier);
+      this.log?.warn?.(`[OMEMO] Identity key changed for ${identifier} (length mismatch)`);
+      return false;
+    }
+    for (let i = 0; i < existingArr.length; i++) {
+      if (existingArr[i] !== newArr[i]) {
+        this.identityConflicts.add(identifier);
+        this.log?.warn?.(`[OMEMO] Identity key changed for ${identifier}`);
+        return false;
+      }
+    }
     return true;
   }
 
@@ -403,6 +432,24 @@ export class OmemoStore {
    */
   async saveIdentity(identifier: string, identityKey: ArrayBuffer): Promise<boolean> {
     const existing = this.identities.get(identifier);
+    if (existing) {
+      const existingArr = new Uint8Array(existing);
+      const newArr = new Uint8Array(identityKey);
+      let changed = existingArr.length !== newArr.length;
+      if (!changed) {
+        for (let i = 0; i < existingArr.length; i++) {
+          if (existingArr[i] !== newArr[i]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) {
+        this.identityConflicts.add(identifier);
+        this.log?.warn?.(`[OMEMO] Refusing to overwrite identity for ${identifier}; manual trust reset required`);
+        return true;
+      }
+    }
     this.identities.set(identifier, identityKey);
     await this.persist();
 
@@ -410,9 +457,9 @@ export class OmemoStore {
     if (existing) {
       const existingArr = new Uint8Array(existing);
       const newArr = new Uint8Array(identityKey);
-      if (existingArr.length !== newArr.length) return true;
+      if (existingArr.length !== newArr.length) {return true;}
       for (let i = 0; i < existingArr.length; i++) {
-        if (existingArr[i] !== newArr[i]) return true;
+        if (existingArr[i] !== newArr[i]) {return true;}
       }
       return false;
     }
@@ -424,7 +471,7 @@ export class OmemoStore {
    */
   async loadPreKey(keyId: number): Promise<{ pubKey: ArrayBuffer; privKey: ArrayBuffer } | undefined> {
     const key = this.preKeys.get(keyId);
-    if (!key) return undefined;
+    if (!key) {return undefined;}
     return {
       pubKey: toArrayBuffer(key.publicKey),
       privKey: toArrayBuffer(key.privateKey),
@@ -460,7 +507,7 @@ export class OmemoStore {
    * Load signed pre-key
    */
   async loadSignedPreKey(keyId: number): Promise<{ pubKey: ArrayBuffer; privKey: ArrayBuffer } | undefined> {
-    if (!this.signedPreKey || this.signedPreKey.id !== keyId) {
+    if (this.signedPreKey?.id !== keyId) {
       return undefined;
     }
     return {
@@ -561,11 +608,11 @@ export class OmemoStore {
     } else if (ArrayBuffer.isView(record)) {
       const view = record as unknown as Uint8Array;
       buf = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
-    } else if (typeof (record as any).byteLength === 'number') {
+    } else if (hasNumericByteLength(record)) {
       try {
-        const len = (record as any).byteLength;
+        const len = record.byteLength;
         buf = new ArrayBuffer(len);
-        new Uint8Array(buf).set(new Uint8Array(record as ArrayBuffer));
+        new Uint8Array(buf).set(new Uint8Array(record as unknown as ArrayBuffer));
       } catch (e) {
         this.log?.warn?.(`[OMEMO] storeSession ${identifier}: failed to copy record - ${e}`);
         return;
